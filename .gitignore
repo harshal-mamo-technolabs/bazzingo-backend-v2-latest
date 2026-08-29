@@ -1,0 +1,7 @@
+node_modules
+logs
+coverage
+.env
+.env.development
+.env.production
+.DS_Store

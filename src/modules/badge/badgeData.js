@@ -1,0 +1,190 @@
+const badges = [
+    {
+        name: "logic-master",
+        title: "Logic Master",
+        description: "Scored 90%+ in Logic category games 3 times",
+        category: "game-achievement",
+        imageUrl: "🧠",
+        rarity: "rare",
+        criteria: {
+            category: "Logic",
+            minScore: 180,
+            requiredCount: 3,
+            scoreType: "percentage",
+        },
+    },
+    {
+        name: "memory-machine",
+        title: "Memory Machine",
+        description: "Scored 80%+ in Memory category games 5 times",
+        category: "game-achievement",
+        imageUrl: "🧩",
+        rarity: "rare",
+        criteria: {
+            category: "Memory",
+            minScore: 160,
+            requiredCount: 5,
+            scoreType: "percentage",
+        },
+    },
+    {
+        name: "reflex-ninja",
+        title: "Reflex Ninja",
+        description: "Top 10% performer in Gameacy category games",
+        category: "game-achievement",
+        imageUrl: "🥷",
+        rarity: "epic",
+        criteria: {
+            category: "Gameacy",
+            percentile: 10,
+            scoreType: "ranking",
+        },
+    },
+    {
+        name: "streak-starter",
+        title: "Streak Starter",
+        description: "Played games for 3 consecutive days",
+        category: "game-achievement",
+        imageUrl: "🔥",
+        rarity: "uncommon",
+        criteria: {
+            consecutiveDays: 3,
+            activityType: "game",
+        },
+    },
+    {
+        name: "game-explorer",
+        title: "Game Explorer",
+        description: "Played 10 unique games",
+        category: "game-achievement",
+        imageUrl: "🎮",
+        rarity: "uncommon",
+        criteria: {
+            uniqueGames: 10,
+        },
+    },
+
+    {
+        name: "smart-start",
+        title: "Smart Start",
+        description: "Scored 100+ IQ on first IQ test",
+        category: "assessment-achievement",
+        imageUrl: "🌟",
+        rarity: "common",
+        criteria: {
+            assessmentType: "iq-test",
+            minScore: 100,
+            isFirstAttempt: true,
+        },
+    },
+    {
+        name: "brain-booster",
+        title: "Brain Booster",
+        description: "Achieved 120+ IQ score",
+        category: "assessment-achievement",
+        imageUrl: "⚡",
+        rarity: "uncommon",
+        criteria: {
+            assessmentType: "iq-test",
+            minScore: 120,
+        },
+    },
+    {
+        name: "genius-certified",
+        title: "Genius Certified",
+        description: "Achieved 140+ IQ score",
+        category: "assessment-achievement",
+        imageUrl: "🎓",
+        rarity: "legendary",
+        criteria: {
+            assessmentType: "iq-test",
+            minScore: 140,
+        },
+    },
+    {
+        name: "consistent-thinker",
+        title: "Consistent Thinker",
+        description: "Submitted assessments for 4 consecutive days",
+        category: "assessment-achievement",
+        imageUrl: "📅",
+        rarity: "rare",
+        criteria: {
+            consecutiveDays: 4,
+            activityType: "assessment",
+        },
+    },
+
+    {
+        name: "first-milestone",
+        title: "First Milestone",
+        description: "Completed your first full assessment",
+        category: "progress-stats",
+        imageUrl: "🎯",
+        rarity: "common",
+        criteria: {
+            assessmentType: "full",
+            isFirst: true,
+        },
+    },
+    {
+        name: "improver",
+        title: "Improver",
+        description: "Improved IQ score by 10+ points",
+        category: "progress-stats",
+        imageUrl: "📈",
+        rarity: "uncommon",
+        criteria: {
+            improvement: 10,
+            scoreType: "iq",
+        },
+    },
+    {
+        name: "leaderboard-rookie",
+        title: "Leaderboard Rookie",
+        description: "Welcome to the leaderboard!",
+        category: "progress-stats",
+        imageUrl: "👋",
+        rarity: "common",
+        criteria: {
+            trigger: "registration",
+        },
+    },
+    {
+        name: "top-10-champion",
+        title: "Top 10 Champion",
+        description: "Ranked in top 10 on leaderboard",
+        category: "progress-stats",
+        imageUrl: "🏆",
+        rarity: "epic",
+        criteria: {
+            maxRank: 10,
+            leaderboardType: "any",
+        },
+    },
+
+    {
+        name: "bazingo-believer",
+        title: "Bazingo Believer",
+        description: "Active for 30+ days",
+        category: "engagement",
+        imageUrl: "💎",
+        rarity: "rare",
+        criteria: {
+            activeDays: 30,
+        },
+    },
+    {
+        name: "early-adopter",
+        title: "Early Adopter",
+        description: "One of the first 1000 users",
+        category: "engagement",
+        imageUrl: "🚀",
+        rarity: "legendary",
+        criteria: {
+            maxUserRank: 1000,
+            trigger: "registration",
+        },
+    },
+];
+
+module.exports = { badges };

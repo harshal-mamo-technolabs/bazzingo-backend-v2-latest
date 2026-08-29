@@ -1,0 +1,41 @@
+{
+    "name": "bazzingo-backend-v2",
+    "version": "1.0.0",
+    "description": "Bazzingo backend service",
+    "main": "src/server.js",
+    "scripts": {
+        "dev": "cross-env NODE_ENV=development nodemon src/server.js",
+        "start": "cross-env NODE_ENV=production node src/server.js",
+        "test": "cross-env NODE_ENV=test jest --runInBand",
+        "test:watch": "cross-env NODE_ENV=test jest --watch --runInBand",
+        "format:check": "prettier . --check",
+        "format:fix": "prettier . --write"
+    },
+    "author": "Bazzingo",
+    "license": "ISC",
+    "dependencies": {
+        "bcryptjs": "^3.0.3",
+        "cors": "^2.8.5",
+        "cross-env": "^7.0.3",
+        "dotenv": "^16.5.0",
+        "express": "^4.21.2",
+        "google-auth-library": "^10.9.1",
+        "http-errors": "^2.0.0",
+        "jsonwebtoken": "^9.0.2",
+        "mongoose": "^8.15.1",
+        "node-cron": "^4.6.0",
+        "nodemailer": "^7.0.13",
+        "puppeteer": "^24.43.1",
+        "qrcode": "^1.5.4",
+        "stripe": "^18.5.0",
+        "web-push": "^3.6.7",
+        "winston": "^3.17.0"
+    },
+    "devDependencies": {
+        "jest": "^29.7.0",
+        "mongodb-memory-server": "^10.1.4",
+        "nodemon": "^3.1.10",
+        "prettier": "^3.4.2",
+        "supertest": "^7.0.0"
+    }
+}
