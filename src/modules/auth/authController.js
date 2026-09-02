@@ -793,7 +793,7 @@ class AuthController {
     }
 
     async resetPassword(req, res, next) {
-        const { oldPassword, newPassword } = req.body;
+        const { newPassword } = req.body;
         const user = req.user;
 
         this.logger.info("Request to change a password", {
@@ -801,27 +801,9 @@ class AuthController {
             userId: String(user._id),
         });
 
-        if (!oldPassword || !newPassword) {
+        if (!newPassword) {
             return next(
                 createHttpError(400, AUTH_ENDPOINT_MESSAGES.PASSWORDS_REQUIRED),
-            );
-        }
-
-        const isMatch = await this.authService.comparePassword(
-            oldPassword,
-            user.password,
-        );
-
-        if (!isMatch) {
-            this.logger.warn("Password change hit a wrong old password", {
-                requestId: req.requestId,
-                userId: String(user._id),
-            });
-            return next(
-                createHttpError(
-                    400,
-                    AUTH_ENDPOINT_MESSAGES.OLD_PASSWORD_INVALID,
-                ),
             );
         }
 

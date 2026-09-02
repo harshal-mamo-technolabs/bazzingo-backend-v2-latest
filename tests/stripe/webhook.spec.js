@@ -939,6 +939,28 @@ describe("POST /stripe/webhook", () => {
                 invoice_settings: { default_payment_method: "pm_attached" },
             });
         });
+
+        // Regression: attaching a second card (e.g. saving an extra,
+        // non-default card from the payment methods list) must not silently
+        // steal the default away from the card the user already picked.
+        it("should not override an existing default payment method", async () => {
+            await User.findByIdAndUpdate(user._id, {
+                stripeCustomerId: "cus_pm2",
+                defaultPaymentMethodId: "pm_existing_default",
+            });
+
+            await givenEvent("payment_method.attached", {
+                id: "pm_new_second_card",
+                customer: "cus_pm2",
+            });
+
+            const refreshed = await User.findById(user._id).lean();
+
+            expect(refreshed.defaultPaymentMethodId).toBe(
+                "pm_existing_default",
+            );
+            expect(mockStripe.customers.update).not.toHaveBeenCalled();
+        });
     });
 
     describe("charge.refunded", () => {

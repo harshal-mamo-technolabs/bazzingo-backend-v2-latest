@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bazzingo — Assessments</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #fff; --line: #e6e8ec; --text: #14161a; --muted: #757d8a;
+    --accent: #2f6feb; --good: #0d8a4f; --good-bg: #e9f7f0; --good-line: #b7e3cd;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 8px 24px -12px rgba(16, 24, 40, .12);
+    --radius: 14px;
+    --t-cognitive: #2f6feb; --t-adhd: #d97706; --t-ei: #7c3aed;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  .layout { display: grid; grid-template-columns: 328px 1fr; height: 100vh; }
+
+  /* ---------- sidebar ---------- */
+  aside { background: var(--panel); border-right: 1px solid var(--line);
+          display: flex; flex-direction: column; overflow: hidden; }
+  aside header { padding: 18px 18px 14px; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .brand h1 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+  .brand .count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stamp { margin-top: 2px; font-size: 11.5px; color: var(--muted); }
+  .field { position: relative; margin-top: 12px; }
+  .field input { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px;
+                 font: inherit; font-size: 13px; background: #fbfcfd; transition: .15s; }
+  .field input:focus { outline: none; border-color: var(--accent); background: #fff;
+                       box-shadow: 0 0 0 3px rgba(47, 111, 235, .12); }
+  .field.small input { font-size: 12px; padding: 7px 10px; color: var(--muted); }
+
+  #list { overflow-y: auto; padding: 10px 10px 24px; scrollbar-width: thin; }
+  .group { position: sticky; top: 0; z-index: 1; background: var(--panel);
+           display: flex; align-items: center; gap: 7px;
+           padding: 14px 8px 7px; font-size: 11px; font-weight: 600; letter-spacing: .07em;
+           text-transform: uppercase; color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--type, var(--accent)); }
+  .item { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left;
+          background: none; border: 0; border-radius: 10px; padding: 9px 10px; cursor: pointer;
+          font: inherit; color: inherit; transition: background .12s; }
+  .item:hover { background: #f3f5f9; }
+  .item[aria-current="true"] { background: rgba(47, 111, 235, .09);
+                               box-shadow: inset 2px 0 0 var(--type, var(--accent)); }
+  .item .name { display: block; font-weight: 600; letter-spacing: -.005em; }
+  .item .sub { display: block; color: var(--muted); font-size: 12px; }
+  .item .grow { flex: 1; min-width: 0; }
+  .item .name, .item .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted);
+          background: #f0f2f6; border-radius: 999px; padding: 2px 8px; }
+
+  /* ---------- main ---------- */
+  main { overflow-y: auto; }
+  .empty { color: var(--muted); text-align: center; padding: 25vh 20px; }
+  .head { position: sticky; top: 0; z-index: 2; background: rgba(244, 245, 247, .88);
+          backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+          padding: 24px 32px 16px; }
+  .head h2 { margin: 0 0 4px; font-size: 23px; letter-spacing: -.02em; }
+  .desc { margin: 0 0 12px; color: var(--muted); max-width: 74ch; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+         padding: 3px 10px; font-size: 12px; color: var(--muted); }
+  .tag.type { border-color: transparent; color: #fff; background: var(--type); font-weight: 600; }
+  .tag.off { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+
+  .minis { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .mini { display: inline-flex; align-items: center; gap: 8px; background: var(--panel);
+          border: 1px solid var(--line); border-radius: 999px; padding: 5px 6px 5px 12px;
+          font-size: 12.5px; cursor: pointer; color: inherit; font-family: inherit;
+          transition: .12s; box-shadow: var(--shadow); }
+  .mini:hover { border-color: var(--type); }
+  .mini[aria-pressed="true"] { background: var(--type); border-color: var(--type); color: #fff; }
+  .mini[aria-pressed="true"] .mini-n { color: rgba(255, 255, 255, .78); }
+  .mini-n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mini a { display: inline-flex; align-items: center; justify-content: center; width: 20px;
+            height: 20px; border-radius: 50%; background: #f0f2f6; color: var(--muted);
+            text-decoration: none; font-size: 11px; }
+  .mini a:hover { background: var(--accent); color: #fff; }
+  .mini[aria-pressed="true"] a { background: rgba(255, 255, 255, .22); color: #fff; }
+
+  .body { padding: 22px 32px 72px; max-width: 980px; }
+  .q { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+       padding: 18px 20px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  .q-head { display: flex; gap: 12px; }
+  .q-no { flex: none; width: 26px; height: 26px; border-radius: 8px; background: #f0f2f6;
+          color: var(--muted); font-size: 12px; font-weight: 600; display: grid; place-items: center;
+          font-variant-numeric: tabular-nums; }
+  .q-text { font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
+  .q-text img { margin-top: 8px; }
+  .prompt { color: var(--muted); font-weight: 400; font-size: 13.5px; margin-bottom: 6px; }
+  .opts { list-style: none; margin: 12px 0 0; padding: 0 0 0 38px; display: grid; gap: 7px; }
+  .opts li { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line);
+             border-radius: 10px; padding: 8px 12px; background: #fcfcfd; }
+  .opts li.correct { border-color: var(--good-line); background: var(--good-bg); color: var(--good);
+                     font-weight: 600; }
+  .opts .idx { flex: none; font-size: 11px; color: var(--muted); width: 14px; }
+  .opts li.correct .idx { color: var(--good); }
+  .opts li.scale { background: #fcfcfd; color: var(--muted); }
+  img { max-width: 100%; max-height: 180px; border-radius: 8px; display: block;
+        border: 1px solid var(--line); }
+  .q-meta { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 38px; margin-top: 12px; }
+  .q-meta span { font-size: 11.5px; color: var(--muted); background: #f4f5f8; border-radius: 6px;
+                 padding: 2px 8px; }
+  code { background: #f0f2f6; padding: 2px 6px; border-radius: 5px; font-size: 12px;
+         color: var(--muted); }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; height: auto; }
+    .head, .body { padding-left: 18px; padding-right: 18px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <header>
+      <div class="brand"><h1>Assessments</h1><span class="count" id="count"></span></div>
+      <div class="stamp" id="stamp"></div>
+      <div class="field"><input id="search" type="search" placeholder="Filter assessments…" /></div>
+      <div class="field small"><input id="imgbase" type="text" /></div>
+    </header>
+    <nav id="list"></nav>
+  </aside>
+  <main id="detail"><p class="empty">Pick an assessment on the left.</p></main>
+</div>
+<script>
+const DATA = /*__DATA__*/null;
+const list = document.getElementById("list");
+const detail = document.getElementById("detail");
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const isImg = (s) => /^(https?:\/\/|\/|data:image)/.test(String(s || ""));
+const base = () => (localStorage.getItem("imgbase") ?? DATA.imageBase).replace(/\/$/, "");
+const media = (s) =>
+  isImg(s)
+    ? `<img src="${esc(s.startsWith("/") ? base() + s : s)}" alt="${esc(s)}"
+            onerror="this.outerHTML='<code>' + this.alt + '</code>'" />`
+    : esc(s);
+const accent = (type) =>
+  type === "ADHD" ? "var(--t-adhd)" : type === "Cognitive" ? "var(--t-cognitive)" : "var(--t-ei)";
+
+document.getElementById("count").textContent = `${DATA.assessments.length}`;
+document.getElementById("stamp").textContent =
+  `${DATA.assessments.reduce((n, a) => n + a.questions.length, 0)} questions · ${new Date(DATA.generatedAt).toLocaleString()}`;
+
+function renderList(filter = "") {
+  const q = filter.trim().toLowerCase();
+  const shown = DATA.assessments.filter((a) => !q || (a.type + " " + a.title).toLowerCase().includes(q));
+
+  list.innerHTML = [...new Set(shown.map((a) => a.type))].map((type) => `
+    <div class="group" style="--type:${accent(type)}"><span class="dot"></span>${esc(type)}</div>
+    ${shown.filter((a) => a.type === type).map((a) => `
+      <button class="item" data-id="${a.id}" style="--type:${accent(type)}">
+        <span class="grow">
+          <span class="name">${esc(a.title)}</span>
+          <span class="sub">…${esc(a.id.slice(-6))}${a.minis.length ? ` · ${a.minis.length} minis` : ""}${a.active ? "" : " · inactive"}</span>
+        </span>
+        <span class="pill">${a.questions.length}</span>
+      </button>`).join("")}`).join("") || `<div class="group">No matches</div>`;
+}
+
+function renderQuestions(questions) {
+  if (!questions.length) return `<p class="empty">No questions stored.</p>`;
+
+  return questions.map((q, i) => `
+    <article class="q">
+      <div class="q-head">
+        <span class="q-no">${i + 1}</span>
+        <div class="grow">
+          ${q.imageQuestionDescription ? `<div class="prompt">${esc(q.imageQuestionDescription)}</div>` : ""}
+          <div class="q-text">${q.questionType === "image" ? media(q.question) : esc(q.question)}</div>
+        </div>
+      </div>
+      ${q.options
+        ? `<ul class="opts">${q.options.map((o, j) => `
+            <li class="${j === q.answerIndex ? "correct" : ""}">
+              <span class="idx">${String.fromCharCode(65 + j)}</span>
+              <span>${q.optionsType === "image" ? media(o) : esc(o)}</span>
+              ${j === q.answerIndex ? `<span style="margin-left:auto">✓</span>` : ""}
+            </li>`).join("")}</ul>`
+        : `<ul class="opts">${(q.optionScores || []).map((s, j) => `
+            <li class="scale"><span class="idx">${j}</span><span>score ${s}</span></li>`).join("")}</ul>`}
+      <div class="q-meta">
+        <span>${esc(q.subcategory)}</span>
+        ${q.points != null ? `<span>${q.points} pts</span>` : ""}
+        ${q.isReverseScored ? `<span>reverse scored</span>` : ""}
+        <span>…${esc(q.id.slice(-6))}</span>
+      </div>
+    </article>`).join("");
+}
+
+let current = null;
+
+function renderDetail(id, miniId = null) {
+  const a = DATA.assessments.find((x) => x.id === id);
+  current = a;
+  document.querySelectorAll(".item").forEach((el) =>
+    el.setAttribute("aria-current", String(el.dataset.id === id)));
+
+  const mini = a.minis.find((m) => m.id === miniId) || null;
+  const byId = new Map(a.questions.map((q) => [q.id, q]));
+  const questions = mini
+    ? mini.questionIds.map((qid) => byId.get(qid)).filter(Boolean)
+    : a.questions;
+
+  detail.innerHTML = `
+    <div class="head" style="--type:${accent(a.type)}">
+      <h2>${esc(a.title)}</h2>
+      <p class="desc">${esc(a.description) || "<em>No description</em>"}</p>
+      <div class="tags">
+        <span class="tag type">${esc(a.type)}</span>
+        <span class="tag">${a.questions.length} / ${a.expected} questions</span>
+        ${a.active ? "" : `<span class="tag off">inactive</span>`}
+        ${a.subcategories.map((s) => `<span class="tag">${esc(s)}</span>`).join("")}
+      </div>
+      ${a.minis.length ? `
+        <div class="minis">
+          <button class="mini" data-mini="" aria-pressed="${!mini}">All questions
+            <span class="mini-n">${a.questions.length}</span></button>
+          ${a.minis.map((m) => `
+            <button class="mini" data-mini="${m.id}" aria-pressed="${mini?.id === m.id}">
+              Mini #${m.order}${m.isActive ? "" : " (off)"}
+              <span class="mini-n">${m.questionIds.length}</span>
+              <a href="${esc(DATA.apiBase)}/assessment/quick/${esc(m.id)}" target="_blank"
+                 title="GET /assessment/quick/${esc(m.id)}"
+                 onclick="event.stopPropagation()">↗</a>
+            </button>`).join("")}
+        </div>` : ""}
+    </div>
+    <div class="body">
+      ${mini ? `<p class="desc">Mini #${mini.order} · size ${mini.size} · <code>${esc(mini.id)}</code></p>` : ""}
+      ${renderQuestions(questions)}
+    </div>`;
+  detail.scrollTop = 0;
+}
+
+list.addEventListener("click", (e) => {
+  const btn = e.target.closest(".item");
+  if (btn) renderDetail(btn.dataset.id);
+});
+detail.addEventListener("click", (e) => {
+  const btn = e.target.closest(".mini");
+  if (btn) renderDetail(current.id, btn.dataset.mini || null);
+});
+document.getElementById("search").addEventListener("input", (e) => renderList(e.target.value));
+
+const imgbase = document.getElementById("imgbase");
+imgbase.placeholder = DATA.imageBase || "Image base URL";
+imgbase.value = localStorage.getItem("imgbase") ?? "";
+imgbase.addEventListener("change", () => {
+  if (imgbase.value) localStorage.setItem("imgbase", imgbase.value);
+  else localStorage.removeItem("imgbase");
+  if (current) renderDetail(current.id);
+});
+
+renderList();
+</script>
+</body>
+</html>

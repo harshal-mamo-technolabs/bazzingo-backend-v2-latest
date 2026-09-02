@@ -61,4 +61,20 @@ router.route("/my-orders").get(requireAuth, handler("getUserOrders"));
 router.route("/quick-pay").post(requireAuth, handler("quickPay"));
 router.route("/pay").post(requireAuth, handler("pay"));
 
+router
+    .route("/payment-methods")
+    .get(requireAuth, handler("listPaymentMethods"));
+router
+    .route("/payment-methods/setup-intent")
+    .post(requireAuth, handler("createCardSetupIntent"));
+router
+    .route("/payment-methods/confirm")
+    .post(requireAuth, handler("confirmCardSetup"));
+router
+    .route("/payment-methods/:paymentMethodId")
+    .delete(requireAuth, handler("removePaymentMethod"));
+router
+    .route("/payment-methods/:paymentMethodId/default")
+    .patch(requireAuth, handler("setDefaultPaymentMethod"));
+
 module.exports = router;

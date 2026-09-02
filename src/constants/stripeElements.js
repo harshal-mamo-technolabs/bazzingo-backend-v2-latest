@@ -94,6 +94,18 @@ const STRIPE_ELEMENTS_MESSAGES = {
     PAYMENT_SUCCESSFUL: "Payment successful",
     COLLECT_PAYMENT_METHOD:
         "Enter card details to complete payment. Your card will be saved for one-click next time.",
+    PAYMENT_METHODS_RETRIEVED: "Payment methods retrieved",
+    PAYMENT_METHODS_FAILED: "Failed to get payment methods",
+    CARD_SETUP_INTENT_CREATED:
+        "SetupIntent created. Collect card details and confirm, then call /payment-methods/confirm.",
+    CARD_SAVED: "Card saved",
+    CARD_SAVE_FAILED: "Failed to save card",
+    PAYMENT_METHOD_NOT_OWNED:
+        "This payment method does not belong to your account",
+    PAYMENT_METHOD_REMOVED: "Card removed",
+    PAYMENT_METHOD_REMOVE_FAILED: "Failed to remove card",
+    DEFAULT_PAYMENT_METHOD_SET: "Default card updated",
+    DEFAULT_PAYMENT_METHOD_FAILED: "Failed to update default card",
 };
 
 const STRIPE_ELEMENTS_DYNAMIC_MESSAGES = {
@@ -158,6 +170,7 @@ const STRIPE_ELEMENTS_FLOWS = {
     GENERIC_ONE_CLICK: "stripe_elements_generic_one_click",
     GENERIC_COLLECT: "stripe_elements_generic_collect",
     TRIAL_FEE: "trial_fee",
+    CARD_MANAGEMENT: "stripe_elements_card_management",
 };
 
 const STRIPE_ELEMENTS_ASSESSMENT_KINDS = {

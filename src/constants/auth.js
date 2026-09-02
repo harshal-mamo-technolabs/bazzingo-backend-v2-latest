@@ -35,8 +35,7 @@ const AUTH_ENDPOINT_MESSAGES = {
     RESET_TOKEN_INVALID: "Invalid token or user does not exist.",
     RESET_TOKEN_EXPIRED: "Token has expired.",
     RESET_TOKEN_BAD: "Invalid token.",
-    PASSWORDS_REQUIRED: "Old and new passwords are required",
-    OLD_PASSWORD_INVALID: "Old password is incorrect",
+    PASSWORDS_REQUIRED: "New password is required",
 };
 
 const AUTH_MESSAGE_BUILDERS = {

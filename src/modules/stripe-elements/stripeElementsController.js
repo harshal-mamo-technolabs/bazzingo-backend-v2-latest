@@ -2108,6 +2108,244 @@ class StripeElementsController {
             );
         }
     }
+
+    async listPaymentMethods(req, res, next) {
+        const user = req.user;
+
+        if (!this.ensureStripe(req, next)) {
+            return;
+        }
+
+        try {
+            const paymentMethods =
+                await this.stripeElementsService.listPaymentMethods(user);
+
+            return sendResponse(res, {
+                statusCode: 200,
+                status: RESPONSE_STATUS.SUCCESS,
+                message: STRIPE_ELEMENTS_MESSAGES.PAYMENT_METHODS_RETRIEVED,
+                data: { paymentMethods },
+            });
+        } catch (error) {
+            next(
+                httpErrorFrom(
+                    error,
+                    STRIPE_ELEMENTS_MESSAGES.PAYMENT_METHODS_FAILED,
+                ),
+            );
+        }
+    }
+
+    async createCardSetupIntent(req, res, next) {
+        const user = req.user;
+
+        this.logger.info("Request to create a card setup intent", {
+            requestId: req.requestId,
+            userId: String(user._id),
+        });
+
+        if (!this.ensureStripe(req, next)) {
+            return;
+        }
+
+        try {
+            const customerId =
+                await this.stripeElementsService.ensureSubscriptionCustomer(
+                    user,
+                );
+            const setupIntent =
+                await this.stripeElementsService.createCardSetupIntent(
+                    user,
+                    customerId,
+                );
+
+            return sendResponse(res, {
+                statusCode: 200,
+                status: RESPONSE_STATUS.SUCCESS,
+                message: STRIPE_ELEMENTS_MESSAGES.CARD_SETUP_INTENT_CREATED,
+                data: {
+                    clientSecret: setupIntent.client_secret,
+                    setupIntentId: setupIntent.id,
+                },
+            });
+        } catch (error) {
+            next(httpErrorFrom(error, STRIPE_ELEMENTS_MESSAGES.SETUP_INTENT_FAILED));
+        }
+    }
+
+    async confirmCardSetup(req, res, next) {
+        const user = req.user;
+        const { setupIntentId } = req.body;
+
+        if (!this.ensureStripe(req, next)) {
+            return;
+        }
+
+        if (!setupIntentId) {
+            return next(
+                createHttpError(
+                    400,
+                    STRIPE_ELEMENTS_MESSAGES.SETUP_INTENT_ID_REQUIRED,
+                ),
+            );
+        }
+
+        try {
+            const setupIntent =
+                await this.stripeElementsService.retrieveSetupIntent(
+                    setupIntentId,
+                );
+
+            if (setupIntent.status !== "succeeded") {
+                throw createHttpError(
+                    400,
+                    STRIPE_ELEMENTS_DYNAMIC_MESSAGES.setupIntentNotConfirmed(
+                        setupIntent.status,
+                    ),
+                );
+            }
+
+            if (
+                user.stripeCustomerId &&
+                setupIntent.customer !== user.stripeCustomerId
+            ) {
+                throw createHttpError(
+                    403,
+                    STRIPE_ELEMENTS_MESSAGES.SETUP_INTENT_NOT_OWNED,
+                );
+            }
+
+            const paymentMethodId = setupIntent.payment_method;
+
+            if (!paymentMethodId) {
+                throw createHttpError(
+                    400,
+                    STRIPE_ELEMENTS_MESSAGES.SETUP_INTENT_NO_PAYMENT_METHOD,
+                );
+            }
+
+            if (!user.defaultPaymentMethodId) {
+                await this.stripeElementsService.saveDefaultPaymentMethod(
+                    user,
+                    setupIntent.customer,
+                    paymentMethodId,
+                );
+            }
+
+            const paymentMethods =
+                await this.stripeElementsService.listPaymentMethods(user);
+
+            return sendResponse(res, {
+                statusCode: 200,
+                status: RESPONSE_STATUS.SUCCESS,
+                message: STRIPE_ELEMENTS_MESSAGES.CARD_SAVED,
+                data: { paymentMethodId, paymentMethods },
+            });
+        } catch (error) {
+            next(httpErrorFrom(error, STRIPE_ELEMENTS_MESSAGES.CARD_SAVE_FAILED));
+        }
+    }
+
+    async removePaymentMethod(req, res, next) {
+        const user = req.user;
+        const { paymentMethodId } = req.params;
+
+        if (!this.ensureStripe(req, next)) {
+            return;
+        }
+
+        try {
+            const paymentMethod =
+                await this.stripeElementsService.retrievePaymentMethod(
+                    paymentMethodId,
+                );
+
+            if (
+                !user.stripeCustomerId ||
+                paymentMethod.customer !== user.stripeCustomerId
+            ) {
+                throw createHttpError(
+                    403,
+                    STRIPE_ELEMENTS_MESSAGES.PAYMENT_METHOD_NOT_OWNED,
+                );
+            }
+
+            await this.stripeElementsService.detachPaymentMethod(
+                paymentMethodId,
+            );
+
+            if (user.defaultPaymentMethodId === paymentMethodId) {
+                user.defaultPaymentMethodId = null;
+                await user.save();
+            }
+
+            const paymentMethods =
+                await this.stripeElementsService.listPaymentMethods(user);
+
+            return sendResponse(res, {
+                statusCode: 200,
+                status: RESPONSE_STATUS.SUCCESS,
+                message: STRIPE_ELEMENTS_MESSAGES.PAYMENT_METHOD_REMOVED,
+                data: { paymentMethods },
+            });
+        } catch (error) {
+            next(
+                httpErrorFrom(
+                    error,
+                    STRIPE_ELEMENTS_MESSAGES.PAYMENT_METHOD_REMOVE_FAILED,
+                ),
+            );
+        }
+    }
+
+    async setDefaultPaymentMethod(req, res, next) {
+        const user = req.user;
+        const { paymentMethodId } = req.params;
+
+        if (!this.ensureStripe(req, next)) {
+            return;
+        }
+
+        try {
+            const paymentMethod =
+                await this.stripeElementsService.retrievePaymentMethod(
+                    paymentMethodId,
+                );
+
+            if (
+                !user.stripeCustomerId ||
+                paymentMethod.customer !== user.stripeCustomerId
+            ) {
+                throw createHttpError(
+                    403,
+                    STRIPE_ELEMENTS_MESSAGES.PAYMENT_METHOD_NOT_OWNED,
+                );
+            }
+
+            await this.stripeElementsService.saveDefaultPaymentMethod(
+                user,
+                user.stripeCustomerId,
+                paymentMethodId,
+            );
+
+            const paymentMethods =
+                await this.stripeElementsService.listPaymentMethods(user);
+
+            return sendResponse(res, {
+                statusCode: 200,
+                status: RESPONSE_STATUS.SUCCESS,
+                message: STRIPE_ELEMENTS_MESSAGES.DEFAULT_PAYMENT_METHOD_SET,
+                data: { paymentMethods },
+            });
+        } catch (error) {
+            next(
+                httpErrorFrom(
+                    error,
+                    STRIPE_ELEMENTS_MESSAGES.DEFAULT_PAYMENT_METHOD_FAILED,
+                ),
+            );
+        }
+    }
 }
 
 module.exports = { StripeElementsController };

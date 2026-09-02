@@ -10,6 +10,7 @@ const {
     STRIPE_ELEMENTS_ERROR_CODES,
     STRIPE_ELEMENTS_PAYMENT_INTENT_STATUSES,
     STRIPE_ELEMENTS_PRICE_TYPES,
+    STRIPE_ACTIVE_SUBSCRIPTION_STATUSES,
     LP_SELECT,
 } = require("../../constants");
 const User = require("../user/userModel");
@@ -216,6 +217,66 @@ class StripeElementsService {
         return await this.stripe.setupIntents.retrieve(setupIntentId);
     }
 
+    async createCardSetupIntent(user, customerId) {
+        this.logger.info("Creating a stripe card setup intent", {
+            userId: String(user._id),
+            customerId,
+        });
+
+        return await this.stripe.setupIntents.create({
+            customer: customerId,
+            payment_method_types: ["card"],
+            usage: "off_session",
+            metadata: this.withUtmMetadata(
+                {
+                    flow: STRIPE_ELEMENTS_FLOWS.CARD_MANAGEMENT,
+                    userId: user._id.toString(),
+                    createdAt: new Date().toISOString(),
+                },
+                user,
+            ),
+        });
+    }
+
+    async listPaymentMethods(user) {
+        if (!user.stripeCustomerId) {
+            return [];
+        }
+
+        this.logger.info("Listing the payment methods of a customer", {
+            userId: String(user._id),
+            customerId: user.stripeCustomerId,
+        });
+
+        const result = await this.stripe.paymentMethods.list({
+            customer: user.stripeCustomerId,
+            type: "card",
+        });
+
+        return result.data
+            .map((pm) => ({
+                id: pm.id,
+                brand: pm.card?.brand || null,
+                last4: pm.card?.last4 || null,
+                expMonth: pm.card?.exp_month || null,
+                expYear: pm.card?.exp_year || null,
+                isDefault: pm.id === user.defaultPaymentMethodId,
+            }))
+            .sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+    }
+
+    async retrievePaymentMethod(paymentMethodId) {
+        return await this.stripe.paymentMethods.retrieve(paymentMethodId);
+    }
+
+    async detachPaymentMethod(paymentMethodId) {
+        this.logger.info("Detaching a stripe payment method", {
+            paymentMethodId,
+        });
+
+        return await this.stripe.paymentMethods.detach(paymentMethodId);
+    }
+
     async saveDefaultPaymentMethod(user, customerId, paymentMethodId) {
         this.logger.info("Saving the default payment method of a customer", {
             userId: String(user._id),
@@ -227,6 +288,11 @@ class StripeElementsService {
             invoice_settings: { default_payment_method: paymentMethodId },
         });
 
+        await this.syncPaymentMethodToOngoingSubscriptions(
+            user,
+            paymentMethodId,
+        );
+
         user.defaultPaymentMethodId = paymentMethodId;
         await user.save();
 
@@ -234,6 +300,45 @@ class StripeElementsService {
             userId: String(user._id),
             paymentMethodId,
         });
+    }
+
+    // A Stripe subscription pins its own default_payment_method at creation
+    // time, so switching the customer-level default alone does not change
+    // what an already-running subscription charges at renewal. Repoint any
+    // ongoing subscription here too, best-effort — a sync failure here must
+    // not block saving the customer's new default payment method.
+    async syncPaymentMethodToOngoingSubscriptions(user, paymentMethodId) {
+        const ongoingSubscriptions = await Subscription.find({
+            userId: user._id,
+            status: { $in: [...STRIPE_ACTIVE_SUBSCRIPTION_STATUSES, "past_due"] },
+        }).lean();
+
+        for (const subscription of ongoingSubscriptions) {
+            try {
+                await this.stripe.subscriptions.update(
+                    subscription.stripeSubscriptionId,
+                    { default_payment_method: paymentMethodId },
+                );
+
+                this.logger.info(
+                    "Synced the default payment method onto an ongoing subscription",
+                    {
+                        userId: String(user._id),
+                        stripeSubscriptionId: subscription.stripeSubscriptionId,
+                        paymentMethodId,
+                    },
+                );
+            } catch (error) {
+                this.logger.error(
+                    "Failed to sync the default payment method onto an ongoing subscription",
+                    {
+                        userId: String(user._id),
+                        stripeSubscriptionId: subscription.stripeSubscriptionId,
+                        reason: error.message,
+                    },
+                );
+            }
+        }
     }
 
     async createSubscriptionForUser({

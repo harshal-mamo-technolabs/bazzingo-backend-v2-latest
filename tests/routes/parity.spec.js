@@ -172,11 +172,25 @@ describe("route parity with the v1 backend", () => {
         expect(V1_ENDPOINTS).toHaveLength(126);
     });
 
-    it("should not add routes beyond the health probe", () => {
+    it("should not add routes beyond the health probe and post-migration additions", () => {
         const extras = [...mounted].filter(
             (route) => !V1_ENDPOINTS.includes(route),
         );
 
-        expect(extras).toEqual(["GET /health"]);
+        // Endpoints added after the v1 migration (card management, plus
+        // GET /stripe/invoices which predates this test) — not part of v1
+        // parity, so they live here rather than in V1_ENDPOINTS.
+        const POST_MIGRATION_ENDPOINTS = [
+            "GET /stripe/invoices",
+            "GET /stripe-elements/payment-methods",
+            "POST /stripe-elements/payment-methods/setup-intent",
+            "POST /stripe-elements/payment-methods/confirm",
+            "DELETE /stripe-elements/payment-methods/:paymentMethodId",
+            "PATCH /stripe-elements/payment-methods/:paymentMethodId/default",
+        ];
+
+        expect(extras.sort()).toEqual(
+            ["GET /health", ...POST_MIGRATION_ENDPOINTS].sort(),
+        );
     });
 });
