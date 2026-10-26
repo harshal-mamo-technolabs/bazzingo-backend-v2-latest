@@ -51,14 +51,6 @@ const LP_HOOK_SNAPSHOT_FIELDS = [
     "uuid",
 ];
 
-const LP_USER_UTM_FIELDS = [
-    "utmSource",
-    "utmCampaign",
-    "utmMedium",
-    "utmEmail",
-    "flowId",
-];
-
 const LP_LEADERBOARD_RANK_FIELDS = [
     "gameGlobalRank",
     "assessmentGlobalRank",
@@ -208,7 +200,6 @@ module.exports = {
     LP_MESSAGES,
     LP_HOOK_UPDATABLE_FIELDS,
     LP_HOOK_SNAPSHOT_FIELDS,
-    LP_USER_UTM_FIELDS,
     LP_LEADERBOARD_RANK_FIELDS,
     LP_FUNNEL_STAGES,
     LP_ASSESSMENT_STATUS,

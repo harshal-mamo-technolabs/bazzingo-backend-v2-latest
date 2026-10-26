@@ -95,7 +95,7 @@ describe("POST /stripe/checkout/session", () => {
             .send(body);
 
     it.each([false, true])(
-        "uses saved attribution for later purchases (legacy=%s)",
+        "attributes a later purchase to its own touch (legacy=%s)",
         async (legacy) => {
             const buyer = await createUser({
                 email: "buyer@bazzingo.com",
@@ -130,18 +130,19 @@ describe("POST /stripe/checkout/session", () => {
             expect(response.status).toBe(200);
             const expected = {
                 utm_source: "google",
-                utm_campaign: legacy ? "organic" : "brand",
-                utm_medium: legacy ? "organic" : "cpc",
+                utm_campaign: "reminder",
+                utm_medium: "email",
             };
             const params = mockStripe.checkout.sessions.create.mock.calls[0][0];
             expect(params.metadata).toMatchObject(expected);
             expect(params.payment_intent_data.metadata).toMatchObject(expected);
+            // The purchase snapshot never rewrites the user's own attribution.
             expect(
                 await User.collection.findOne({ _id: buyer._id }),
             ).toMatchObject({
-                utmSource: expected.utm_source,
-                utmCampaign: expected.utm_campaign,
-                utmMedium: expected.utm_medium,
+                utmSource: "google",
+                utmCampaign: legacy ? "organic" : "brand",
+                utmMedium: legacy ? "organic" : "cpc",
             });
         },
     );

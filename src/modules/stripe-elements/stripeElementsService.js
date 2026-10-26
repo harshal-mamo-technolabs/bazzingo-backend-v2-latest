@@ -88,7 +88,6 @@ class StripeElementsService {
     withUtmMetadata(metadata, user) {
         return {
             ...metadata,
-            ...buildUtmMetadata(user),
             ...buildPurchaseAttributionMetadata(user),
         };
     }

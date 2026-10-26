@@ -4,6 +4,7 @@ const { config } = require("../../config");
 const { sendResponse } = require("../../common/utils/response");
 const {
     parseUtmParams,
+    parseUtmTouch,
     parseFlowId,
     ensureUtmDefaults,
     persistUtmDefaults,
@@ -141,15 +142,19 @@ class AuthController {
         let user = await this.authService.findByEmail(email);
         if (user) await persistUtmDefaults(user);
 
-        const resolveUtm = (field) =>
-            (user ? realUtmValue(user[field]) : null) ??
-            realUtmValue(hookUtm[field]) ??
-            realUtmValue(providedUtm[field]) ??
+        // utmSource is first-touch and locked; campaign/medium follow the latest touch.
+        const touch = parseUtmTouch(hookUtm) ?? parseUtmTouch(providedUtm);
+        const utmSource =
+            (user ? realUtmValue(user.utmSource) : null) ??
+            realUtmValue(hookUtm.firstSource) ??
+            touch?.utmSource ??
             UTM_DEFAULT;
-
-        const utmSource = resolveUtm("utmSource");
-        const utmCampaign = resolveUtm("utmCampaign");
-        const utmMedium = resolveUtm("utmMedium");
+        const latest = (field) =>
+            touch?.[field] ??
+            (user ? realUtmValue(user[field]) : null) ??
+            UTM_DEFAULT;
+        const utmCampaign = latest("utmCampaign");
+        const utmMedium = latest("utmMedium");
         const flowId = parseFlowId(req.body) ?? hookUtm.flowId ?? user?.flowId;
 
         // Unlike the three fields above, utmEmail has no "default" fallback —
@@ -180,7 +185,6 @@ class AuthController {
                 user.quickMiniAssessmntId = quickMiniAssessmntId;
             }
 
-            user.utmSource = utmSource;
             user.utmCampaign = utmCampaign;
             user.utmMedium = utmMedium;
             if (utmEmail) user.utmEmail = utmEmail;
@@ -249,6 +253,13 @@ class AuthController {
                 return {};
             }
 
+            const firstHook = emailKey
+                ? await LandingPageHook.findOne({ email: emailKey })
+                      .sort({ createdAt: 1 })
+                      .select("utmSource")
+                      .lean()
+                : null;
+
             this.logger.info("Landing page hook matched for utm", {
                 requestId,
                 hookUuid: hook.uuid,
@@ -260,6 +271,7 @@ class AuthController {
                 utmMedium: hook.utmMedium,
                 utmEmail: hook.utmEmail,
                 flowId: hook.flowId,
+                firstSource: firstHook?.utmSource,
             };
         } catch (err) {
             this.logger.error("Landing page hook utm lookup failed", {

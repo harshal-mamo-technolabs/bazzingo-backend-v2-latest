@@ -1,15 +1,13 @@
 const {
     LP_PROGRAM_SCORE,
-    LP_USER_UTM_FIELDS,
     LP_SELECT,
 } = require("../../constants");
 const { getAssessmentAgeGroup } = require("../assessment/assessmentService");
 const AssessmentScore = require("../assessment/assessmentScoreModel");
 const User = require("../user/userModel");
 const {
-    hasRealUtm,
     realUtmValue,
-    parseUtmParams,
+    UTM_DEFAULT,
     persistUtmDefaults,
 } = require("../../common/utils/utmParams");
 const LandingPageHook = require("./landingPageHookModel");
@@ -32,12 +30,10 @@ class LpService {
             uuid: fields.uuid,
         });
 
-        const user = fields.email
-            ? await this.findUserByEmail(fields.email)
-            : null;
+        const utmSource = await this.lockedSource(fields.email, fields.uuid);
         return await LandingPageHook.create({
             ...fields,
-            ...(user ? parseUtmParams(user) : {}),
+            ...(utmSource ? { utmSource } : {}),
         });
     }
 
@@ -45,7 +41,32 @@ class LpService {
         this.logger.info("Saving a landing page hook", { uuid: hook.uuid });
 
         await persistUtmDefaults(hook);
+        const utmSource = await this.lockedSource(hook.email, hook.uuid);
+        if (utmSource && hook.utmSource !== utmSource) {
+            hook.set("utmSource", utmSource, undefined, {
+                overwriteImmutable: true,
+            });
+        }
         return await hook.save();
+    }
+
+    // utmSource is locked per email: the user's, else the email's first hook.
+    async lockedSource(email, uuid) {
+        if (!email) return null;
+
+        const user = await User.findOne({ email: String(email).toLowerCase() })
+            .select("utmSource")
+            .lean();
+        if (realUtmValue(user?.utmSource) !== null) return user.utmSource;
+
+        const firstHook = await LandingPageHook.findOne({
+            email: String(email).toLowerCase(),
+            uuid: { $ne: uuid },
+        })
+            .sort({ createdAt: 1 })
+            .select("utmSource")
+            .lean();
+        return realUtmValue(firstHook?.utmSource);
     }
 
     async findUserById(userId) {
@@ -74,13 +95,7 @@ class LpService {
 
     async backfillUserUtmFromHook(hook) {
         try {
-            if (
-                !hook ||
-                !hook.email ||
-                (!hasRealUtm(hook) &&
-                    realUtmValue(hook.utmEmail) === null &&
-                    !hook.flowId)
-            ) {
+            if (!hook || !hook.email) {
                 return;
             }
 
@@ -90,22 +105,24 @@ class LpService {
                 return;
             }
 
-            let changed = false;
-
-            for (const field of LP_USER_UTM_FIELDS) {
-                const real = realUtmValue(hook[field]);
-
-                if (
-                    real !== null &&
-                    (realUtmValue(user[field]) === null ||
-                        (field === "flowId" && user.flowId !== real))
-                ) {
-                    user[field] = real;
-                    changed = true;
-                }
+            // utmSource is locked on the user; a campaign touch moves campaign/medium only.
+            if (
+                hook.utmCampaign !== UTM_DEFAULT ||
+                hook.utmMedium !== UTM_DEFAULT
+            ) {
+                user.utmCampaign = hook.utmCampaign;
+                user.utmMedium = hook.utmMedium;
             }
 
-            if (changed) {
+            const utmEmail = realUtmValue(hook.utmEmail);
+            if (utmEmail !== null && realUtmValue(user.utmEmail) === null) {
+                user.utmEmail = utmEmail;
+            }
+            if (hook.flowId && user.flowId !== hook.flowId) {
+                user.flowId = hook.flowId;
+            }
+
+            if (user.isModified()) {
                 await user.save();
 
                 this.logger.info("Backfilled the user UTM from a hook", {

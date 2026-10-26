@@ -68,6 +68,7 @@ const config = {
         "HELP_SCOUT_FRAME_ANCESTORS",
         "https://secure.helpscout.net https://*.helpscout.net",
     ),
+    UTM_DEFAULT_VALUE: optionalEnv("UTM_DEFAULT_VALUE", "organic"),
     HELP_SCOUT_UTM_SOURCE_SLUG: optionalEnv(
         "HELP_SCOUT_UTM_SOURCE_SLUG",
         "utm_source",

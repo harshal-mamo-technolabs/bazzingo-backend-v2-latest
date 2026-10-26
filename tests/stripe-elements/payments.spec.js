@@ -122,7 +122,7 @@ describe("stripe elements one time payment endpoints", () => {
             );
         });
 
-        it("keeps saved attribution on assessment payments after an email visit", async () => {
+        it("attributes an assessment payment to its own touch, keeping the locked source", async () => {
             const buyer = await createUser({
                 email: "buyer@bazzingo.com",
                 utmSource: "google",
@@ -146,8 +146,8 @@ describe("stripe elements one time payment endpoints", () => {
                 mockStripe.paymentIntents.create.mock.calls[0][0].metadata,
             ).toMatchObject({
                 utm_source: "google",
-                utm_campaign: "brand",
-                utm_medium: "cpc",
+                utm_campaign: "organic",
+                utm_medium: "email",
             });
         });
 

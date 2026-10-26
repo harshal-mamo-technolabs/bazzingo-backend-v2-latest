@@ -7,6 +7,8 @@ const {
     persistUtmDefaults,
     buildUtmMetadata,
     parseFlowId,
+    parseUtmTouch,
+    isNewTouch,
 } = require("../../src/common/utils/utmParams");
 const { mergeUtmMetadata } = require("../../src/modules/stripe/stripeService");
 const {
@@ -87,6 +89,26 @@ describe("fixed UTM attribution", () => {
         ).toMatchObject(organic);
     });
 
+    it("treats only a visit with its own source or campaign as a new touch", () => {
+        const hook = { ...original };
+        expect(parseUtmTouch({ utm_medium: "klaviyo_email" })).toBeNull();
+        expect(isNewTouch(hook, parseUtmTouch({ utm_medium: "x" }))).toBe(false);
+        expect(isNewTouch(hook, parseUtmTouch(original))).toBe(false);
+        expect(
+            isNewTouch(
+                hook,
+                parseUtmTouch({ ...original, utmCampaign: "abandoned cart" }),
+            ),
+        ).toBe(true);
+        // Known email: a different source alone is not a new touch (source is locked).
+        expect(
+            isNewTouch(
+                { ...original, email: "a@b.co" },
+                parseUtmTouch({ ...original, utmSource: "Klaviyo" }),
+            ),
+        ).toBe(false);
+    });
+
     it.each([original, organic])(
         "prevents document and query updates to saved attribution %j",
         async (values) => {
@@ -106,9 +128,14 @@ describe("fixed UTM attribution", () => {
                     { _id: record._id },
                     { $unset: { utmSource: 1 } },
                 );
+                // Hooks keep their visit's UTMs; users lock only the source.
                 expect(
                     await record.collection.findOne({ _id: record._id }),
-                ).toMatchObject(values);
+                ).toMatchObject(
+                    record === user
+                        ? { ...replacement, utmSource: values.utmSource }
+                        : values,
+                );
             }
         },
     );
@@ -136,24 +163,25 @@ describe("fixed UTM attribution", () => {
         });
     });
 
-    it("uses saved values in both Stripe paths and Help Scout, even with email attribution", () => {
+    it("treats a purchase without its own touch as organic, keeping the locked source", () => {
         const user = { ...original, utmEmail: "Klaviyo" };
-        const expected = {
+        const purchase = {
             utm_source: "google",
-            utm_campaign: "brand",
-            utm_medium: "cpc",
+            utm_campaign: "organic",
+            utm_medium: "organic",
         };
         expect(mergeUtmMetadata({ utm_medium: "email" }, user)).toMatchObject(
-            expected,
+            purchase,
         );
         expect(
             new StripeElementsService(logger).withUtmMetadata(
                 { utm_medium: "email" },
                 user,
             ),
-        ).toEqual(expected);
+        ).toEqual(purchase);
+        // Help Scout shows the user's profile, not a single purchase.
         expect(
             new HelpscoutService(logger).buildUtmIdentifyProperties(user),
-        ).toEqual(expected);
+        ).toEqual({ utm_source: "google", utm_campaign: "brand", utm_medium: "cpc" });
     });
 });

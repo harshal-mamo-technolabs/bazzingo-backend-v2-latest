@@ -1,11 +1,13 @@
+const crypto = require("crypto");
 const createHttpError = require("http-errors");
 const jwt = require("jsonwebtoken");
 const { config } = require("../../config");
 const { sendResponse } = require("../../common/utils/response");
 const { getCETMidnight } = require("../../common/utils/time");
 const {
-    applyUtmToRecord,
     parseUtmParams,
+    parseUtmTouch,
+    isNewTouch,
     parseFlowId,
 } = require("../../common/utils/utmParams");
 const {
@@ -83,7 +85,7 @@ class LpController {
     }
 
     async createLpHook(req, res, next) {
-        const { uuid } = req.body;
+        let { uuid } = req.body;
 
         this.logger.info("Request to create a landing page hook", {
             requestId: req.requestId,
@@ -96,6 +98,19 @@ class LpController {
 
         let hook = await this.lpService.findHookByUuid(uuid);
         const flowId = parseFlowId(req.body);
+        const email = req.body.email
+            ? String(req.body.email).trim().toLowerCase()
+            : null;
+
+        // A new campaign touch or a different person starts a fresh hook.
+        if (
+            hook &&
+            (isNewTouch(hook, parseUtmTouch(req.body)) ||
+                (hook.email && email && hook.email !== email))
+        ) {
+            hook = null;
+            uuid = crypto.randomUUID();
+        }
 
         if (hook) {
             if (flowId) hook.flowId = flowId;
@@ -105,10 +120,6 @@ class LpController {
                 }
             }
 
-            applyUtmToRecord(
-                hook,
-                parseUtmParams(req.body, { onlyProvided: true }),
-            );
             await this.lpService.saveHook(hook);
         } else {
             const fields = { uuid };
@@ -171,8 +182,6 @@ class LpController {
         const flowId = parseFlowId(updates);
         if (flowId) hook.flowId = flowId;
 
-        applyUtmToRecord(hook, parseUtmParams(updates, { onlyProvided: true }));
-
         for (const key of Object.keys(updates)) {
             if (LP_HOOK_UPDATABLE_FIELDS.includes(key)) {
                 hook[key] = updates[key];
@@ -212,16 +221,33 @@ class LpController {
             return next(createHttpError(400, LP_MESSAGES.UUID_REQUIRED));
         }
 
-        const hook = await this.lpService.findHookByUuid(uuid);
+        let hook = await this.lpService.findHookByUuid(uuid);
 
         if (!hook) {
             return next(createHttpError(404, LP_MESSAGES.HOOK_NOT_FOUND));
         }
 
+        const previousHook = hook.toObject();
+
+        // A reminder link with a new campaign continues the funnel on a new hook.
+        const touch = parseUtmTouch(req.query);
+        if (isNewTouch(hook, touch)) {
+            hook = await this.lpService.createHook({
+                ...Object.fromEntries(
+                    LP_HOOK_UPDATABLE_FIELDS.map((key) => [
+                        key,
+                        previousHook[key],
+                    ]),
+                ),
+                flowId: previousHook.flowId,
+                uuid: crypto.randomUUID(),
+                ...touch,
+            });
+        }
+
         const queryUtmEmail = req.query[LP_UTM_MEDIUM_QUERY_PARAM];
         const utmEmail =
             typeof queryUtmEmail === "string" ? queryUtmEmail.trim() : "";
-        const previousHook = hook.toObject();
         const flowId = parseFlowId(req.query);
         if (flowId) hook.flowId = flowId;
 
@@ -259,7 +285,7 @@ class LpController {
                         email: hook.email,
                         metricName:
                             KLAVIYO_EVENTS.LANDING_PAGE_RESUMED_FROM_EMAIL,
-                        uniqueId: `${uuid}:${LP_KLAVIYO_EVENT_IDS.RESUMED}:${stage}`,
+                        uniqueId: `${hook.uuid}:${LP_KLAVIYO_EVENT_IDS.RESUMED}:${stage}`,
                         properties: {
                             [LP_KLAVIYO_PROPERTIES.STAGE]: stage,
                             [LP_KLAVIYO_PROPERTIES.SOURCE]:
@@ -298,6 +324,7 @@ class LpController {
             status: RESPONSE_STATUS.SUCCESS,
             message: LP_MESSAGES.HOOK_RESUMED,
             data: {
+                uuid: hook.uuid,
                 stage,
                 token,
                 email: hook.email,

@@ -396,6 +396,8 @@ class StripeElementsController {
             user.$locals.purchaseAttribution = {
                 flowId: setupIntent.metadata?.flow_id,
                 utmEmail: setupIntent.metadata?.utm_email,
+                utmCampaign: setupIntent.metadata?.utm_campaign,
+                utmMedium: setupIntent.metadata?.utm_medium,
             };
 
             const finalRecurringPriceId =

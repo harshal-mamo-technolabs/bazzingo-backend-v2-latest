@@ -477,7 +477,7 @@ describe("POST /auth/signup-lp", () => {
     });
 
     it.each(["organic", "google"])(
-        "should preserve saved attribution on repeat signup (%s)",
+        "should lock the source but take the latest campaign on repeat signup (%s)",
         async (source) => {
             const user = await createUser({
                 email: validBody.email,
@@ -496,16 +496,16 @@ describe("POST /auth/signup-lp", () => {
                 await User.collection.findOne({ _id: user._id }),
             ).toMatchObject({
                 utmSource: source,
-                utmCampaign: "original",
-                utmMedium: "cpc",
+                utmCampaign: "reminder",
+                utmMedium: "email",
             });
             expect(
                 helpscoutService.scheduleSyncUserUtmToHelpScout,
             ).toHaveBeenCalledWith(
                 expect.objectContaining({
                     utmSource: source,
-                    utmCampaign: "original",
-                    utmMedium: "cpc",
+                    utmCampaign: "reminder",
+                    utmMedium: "email",
                 }),
             );
         },

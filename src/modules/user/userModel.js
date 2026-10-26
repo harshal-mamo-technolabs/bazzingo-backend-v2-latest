@@ -178,15 +178,14 @@ const UserSchema = new mongoose.Schema(
             default: UTM_DEFAULT,
             immutable: true,
         },
+        // Source is first-touch and locked; campaign/medium follow the latest touch.
         utmCampaign: {
             type: String,
             default: UTM_DEFAULT,
-            immutable: true,
         },
         utmMedium: {
             type: String,
             default: UTM_DEFAULT,
-            immutable: true,
         },
         utmEmail: {
             type: String,

@@ -1,5 +1,6 @@
 const createHttpError = require("http-errors");
-const UTM_DEFAULT = "organic";
+const { config } = require("../../config");
+const UTM_DEFAULT = config.UTM_DEFAULT_VALUE;
 const UTM_FIELDS = ["utmSource", "utmCampaign", "utmMedium"];
 
 const parseFlowId = (params = {}) => {
@@ -49,6 +50,21 @@ const parseUtmParams = (body = {}, { onlyProvided = false } = {}) => {
     );
 };
 
+// A campaign touch is a visit that carried its own utm_source or utm_campaign.
+const parseUtmTouch = (params = {}) => {
+    const parsed = parseUtmParams(params);
+    return parsed.utmSource !== UTM_DEFAULT || parsed.utmCampaign !== UTM_DEFAULT
+        ? parsed
+        : null;
+};
+
+// Once the email is known its source is locked, so only campaign/medium mark a new touch.
+const isNewTouch = (record, touch) =>
+    Boolean(touch) &&
+    (record.email ? ["utmCampaign", "utmMedium"] : UTM_FIELDS).some(
+        (field) => record[field] !== touch[field],
+    );
+
 const realUtmValue = (value) => {
     if (value === undefined || value === null) {
         return null;
@@ -60,14 +76,6 @@ const realUtmValue = (value) => {
         ? null
         : trimmed;
 };
-
-const hasRealUtm = (record) =>
-    Boolean(
-        record &&
-        (realUtmValue(record.utmSource) !== null ||
-            realUtmValue(record.utmCampaign) !== null ||
-            realUtmValue(record.utmMedium) !== null),
-    );
 
 const ensureUtmDefaults = (record) => {
     if (!record) {
@@ -131,33 +139,25 @@ const buildUtmMetadata = (user) => ({
     utm_medium: realUtmValue(user?.utmMedium) ?? UTM_DEFAULT,
 });
 
+// A purchase keeps the locked source; campaign/medium come from the purchase's own
+// touch (set on $locals.purchaseAttribution) and are organic without one.
 const buildPurchaseAttributionMetadata = (user) => {
     const attribution = user?.$locals?.purchaseAttribution;
     return {
+        utm_source: realUtmValue(user?.utmSource) ?? UTM_DEFAULT,
+        utm_campaign: realUtmValue(attribution?.utmCampaign) ?? UTM_DEFAULT,
+        utm_medium: realUtmValue(attribution?.utmMedium) ?? UTM_DEFAULT,
         ...(attribution?.flowId ? { flow_id: attribution.flowId } : {}),
         ...(attribution?.utmEmail ? { utm_email: attribution.utmEmail } : {}),
     };
 };
 
-const applyUtmToRecord = (record, parsed) => {
-    for (const field of UTM_FIELDS) {
-        if (
-            realUtmValue(record[field]) === null &&
-            parsed[field] !== undefined
-        ) {
-            record[field] = parsed[field];
-        }
-    }
-
-    return ensureUtmDefaults(record);
-};
-
 module.exports = {
     parseUtmParams,
     ensureUtmDefaults,
-    applyUtmToRecord,
     realUtmValue,
-    hasRealUtm,
+    parseUtmTouch,
+    isNewTouch,
     UTM_DEFAULT,
     persistUtmDefaults,
     buildUtmMetadata,

@@ -55,7 +55,6 @@
 
         const mergeUtmMetadata = (metadata = {}, user) => ({
             ...metadata,
-            ...buildUtmMetadata(user),
             ...buildPurchaseAttributionMetadata(user),
         });
 
@@ -1191,6 +1190,8 @@
                     user.$locals.purchaseAttribution = {
                         flowId: metadata.flow_id,
                         utmEmail: metadata.utm_email,
+                        utmCampaign: metadata.utm_campaign,
+                        utmMedium: metadata.utm_medium,
                     };
                     const recurringCadence = metadata.recurringCadence || type;
                     const trialRequested = metadata.trialRequested === "true";
