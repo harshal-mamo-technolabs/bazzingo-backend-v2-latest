@@ -37,5 +37,10 @@
         "nodemon": "^3.1.10",
         "prettier": "^3.4.2",
         "supertest": "^7.0.0"
+    },
+    "nodemonConfig": {
+        "ignore": [
+            "backup/*"
+        ]
     }
 }

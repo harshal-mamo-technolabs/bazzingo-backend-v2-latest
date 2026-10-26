@@ -373,6 +373,7 @@ describe("POST /auth/signup-msisdn and /auth/login-msisdn", () => {
         expect(response.body.data.email).toBe(`${msisdn}@gmail.com`);
         const user = await User.findOne({ msisdn });
         expect(user.email).toBe(`${msisdn}@gmail.com`);
+        expect(user.signupType).toBe("msisdn");
     });
 
     it("should hash the msisdn as the password", async () => {

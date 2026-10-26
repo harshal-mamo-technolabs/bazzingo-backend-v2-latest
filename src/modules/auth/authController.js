@@ -334,6 +334,7 @@ class AuthController {
         const user = await this.authService.createUser({
             name,
             email: generatedEmail,
+            signupType: "msisdn",
             age,
             country,
             password: await this.authService.hashPassword(msisdn),

@@ -5,6 +5,7 @@ const {
     buildUtmMetadata,
     buildPurchaseAttributionMetadata,
 } = require("../../common/utils/utmParams");
+const { createPricePayment } = require("../../common/utils/stripePricePayment");
 const {
     STRIPE_ELEMENTS_MESSAGES,
     STRIPE_ELEMENTS_DYNAMIC_MESSAGES,
@@ -352,29 +353,22 @@ class StripeElementsService {
         });
 
         if (withTrial && trialPriceId) {
-            const trialPrice = await this.retrievePrice(trialPriceId);
-
-            await this.stripe.invoiceItems.create({
-                customer: customerId,
-                amount: trialPrice.unit_amount,
-                currency: trialPrice.currency,
-                description:
-                    STRIPE_ELEMENTS_DYNAMIC_MESSAGES.trialAccessDescription(
-                        trialDays,
-                    ),
-                metadata: this.withUtmMetadata(
-                    {
-                        type: STRIPE_ELEMENTS_FLOWS.TRIAL_FEE,
-                        trialDays: String(trialDays),
-                        trialPriceId,
-                    },
-                    user,
-                ),
-            });
-
             const subscription = await this.stripe.subscriptions.create({
                 customer: customerId,
                 items: [{ price: recurringPriceId }],
+                add_invoice_items: [
+                    {
+                        price: trialPriceId,
+                        metadata: this.withUtmMetadata(
+                            {
+                                type: STRIPE_ELEMENTS_FLOWS.TRIAL_FEE,
+                                trialDays: String(trialDays),
+                                trialPriceId,
+                            },
+                            user,
+                        ),
+                    },
+                ],
                 default_payment_method: paymentMethodId,
                 trial_period_days: trialDays,
                 payment_behavior: "default_incomplete",
@@ -823,67 +817,51 @@ class StripeElementsService {
         return price;
     }
 
-    async resolveGenericChargeAmount({
-        priceCatalogId,
-        amount,
-        currency,
-        productName,
-    }) {
+    async resolveGenericChargeAmount({ priceCatalogId, productName }) {
         this.logger.info("Resolving a generic charge amount", {
             priceCatalogId: priceCatalogId ? String(priceCatalogId) : null,
-            amount,
         });
 
-        if (priceCatalogId) {
-            const price = await PriceCatalog.findOne({
-                _id: priceCatalogId,
-                active: true,
-            }).lean();
-
-            if (!price) {
-                throw createHttpError(
-                    404,
-                    STRIPE_ELEMENTS_MESSAGES.PRICE_CATALOG_NOT_FOUND,
-                );
-            }
-
-            if (
-                !price.unitAmount ||
-                price.unitAmount < STRIPE_ELEMENTS_DEFAULTS.MINIMUM_AMOUNT
-            ) {
-                throw createHttpError(
-                    400,
-                    STRIPE_ELEMENTS_MESSAGES.BELOW_STRIPE_MINIMUM,
-                );
-            }
-
-            return {
-                amountCents: price.unitAmount,
-                currency: (
-                    price.currency || STRIPE_ELEMENTS_DEFAULTS.CURRENCY
-                ).toLowerCase(),
-                productName:
-                    productName || STRIPE_ELEMENTS_DEFAULTS.PRODUCT_NAME,
-                priceCatalogId: price._id,
-            };
+        // Every charge must be a Stripe price, so a client-sent amount is never billed.
+        if (!priceCatalogId) {
+            throw createHttpError(
+                400,
+                STRIPE_ELEMENTS_MESSAGES.PRICE_CATALOG_ID_REQUIRED,
+            );
         }
 
-        const amountCents = Math.round(Number(amount));
+        const price = await PriceCatalog.findOne({
+            _id: priceCatalogId,
+            type: STRIPE_ELEMENTS_PRICE_TYPES.ONE_TIME,
+            active: true,
+        }).lean();
+
+        if (!price) {
+            throw createHttpError(
+                404,
+                STRIPE_ELEMENTS_MESSAGES.PRICE_CATALOG_NOT_FOUND,
+            );
+        }
 
         if (
-            !Number.isInteger(amountCents) ||
-            amountCents < STRIPE_ELEMENTS_DEFAULTS.MINIMUM_AMOUNT
+            !price.unitAmount ||
+            price.unitAmount < STRIPE_ELEMENTS_DEFAULTS.MINIMUM_AMOUNT
         ) {
-            throw createHttpError(400, STRIPE_ELEMENTS_MESSAGES.AMOUNT_INVALID);
+            throw createHttpError(
+                400,
+                STRIPE_ELEMENTS_MESSAGES.BELOW_STRIPE_MINIMUM,
+            );
         }
 
         return {
-            amountCents,
+            amountCents: price.unitAmount,
             currency: (
-                currency || STRIPE_ELEMENTS_DEFAULTS.CURRENCY
+                price.currency || STRIPE_ELEMENTS_DEFAULTS.CURRENCY
             ).toLowerCase(),
-            productName: productName || STRIPE_ELEMENTS_DEFAULTS.PRODUCT_NAME,
-            priceCatalogId: null,
+            productName:
+                productName || STRIPE_ELEMENTS_DEFAULTS.PRODUCT_NAME,
+            priceCatalogId: price._id,
+            stripePriceId: price.stripePriceId,
         };
     }
 
@@ -959,10 +937,9 @@ class StripeElementsService {
             orderId: String(order._id),
         });
 
-        return await this.stripe.paymentIntents.create({
-            amount: price.unitAmount,
-            currency: price.currency.toLowerCase(),
-            customer: customerId,
+        return await createPricePayment(this.stripe, {
+            customerId,
+            priceId: price.stripePriceId,
             description: STRIPE_ELEMENTS_DYNAMIC_MESSAGES.assessmentDescription(
                 context.assessmentDisplayName,
             ),
@@ -977,11 +954,6 @@ class StripeElementsService {
                 },
                 user,
             ),
-            setup_future_usage: "off_session",
-            payment_method_types: ["card"],
-            payment_method_options: {
-                card: { request_three_d_secure: "automatic" },
-            },
         });
     }
 
@@ -997,13 +969,10 @@ class StripeElementsService {
             orderId: String(order._id),
         });
 
-        return await this.stripe.paymentIntents.create({
-            amount: price.unitAmount,
-            currency: price.currency.toLowerCase(),
-            customer: user.stripeCustomerId,
-            payment_method: paymentMethodId,
-            confirm: true,
-            off_session: true,
+        return await createPricePayment(this.stripe, {
+            customerId: user.stripeCustomerId,
+            priceId: price.stripePriceId,
+            paymentMethodId,
             description: STRIPE_ELEMENTS_DYNAMIC_MESSAGES.assessmentDescription(
                 assessment.mainCategory ||
                     assessment.name ||
@@ -1019,7 +988,6 @@ class StripeElementsService {
                 },
                 user,
             ),
-            payment_method_types: ["card"],
         });
     }
 
@@ -1032,35 +1000,16 @@ class StripeElementsService {
     }) {
         this.logger.info("Creating a generic stripe payment intent", {
             customerId,
-            amount: charge.amountCents,
+            stripePriceId: charge.stripePriceId,
             oneClick: Boolean(paymentMethodId),
         });
 
-        if (paymentMethodId) {
-            return await this.stripe.paymentIntents.create({
-                amount: charge.amountCents,
-                currency: charge.currency,
-                customer: customerId,
-                payment_method: paymentMethodId,
-                confirm: true,
-                off_session: true,
-                description,
-                metadata,
-                payment_method_types: ["card"],
-            });
-        }
-
-        return await this.stripe.paymentIntents.create({
-            amount: charge.amountCents,
-            currency: charge.currency,
-            customer: customerId,
+        return await createPricePayment(this.stripe, {
+            customerId,
+            priceId: charge.stripePriceId,
             description,
             metadata,
-            setup_future_usage: "off_session",
-            payment_method_types: ["card"],
-            payment_method_options: {
-                card: { request_three_d_secure: "automatic" },
-            },
+            paymentMethodId,
         });
     }
 

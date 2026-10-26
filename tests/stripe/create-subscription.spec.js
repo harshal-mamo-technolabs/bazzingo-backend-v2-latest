@@ -13,7 +13,7 @@ const { createUser, getAccessToken } = require("../utils/fixtures");
 const mockStripe = {
     prices: { create: jest.fn(), retrieve: jest.fn() },
     customers: { create: jest.fn(), update: jest.fn() },
-    paymentIntents: { create: jest.fn(), retrieve: jest.fn() },
+    paymentIntents: { create: jest.fn(), retrieve: jest.fn(), update: jest.fn() },
     checkout: { sessions: { create: jest.fn(), list: jest.fn() } },
     subscriptions: {
         create: jest.fn(),
@@ -121,6 +121,7 @@ describe("POST /stripe/subscription", () => {
                       type: "one_time",
                       currency: "eur",
                       unit_amount: 100,
+                      product: "prod_plan",
                   }
                 : {
                       id,
@@ -128,6 +129,7 @@ describe("POST /stripe/subscription", () => {
                       type: "recurring",
                       currency: "eur",
                       unit_amount: 1999,
+                      product: "prod_plan",
                   },
         );
     });
@@ -389,6 +391,29 @@ describe("POST /stripe/subscription", () => {
             );
         });
 
+        it("should return a 400 status code when the trial price belongs to another product", async () => {
+            const plan = await seedPlanWithPrices({ trial: true });
+            mockStripe.prices.retrieve.mockImplementation(async (id) => ({
+                id,
+                active: true,
+                type: id === "price_trial" ? "one_time" : "recurring",
+                currency: "eur",
+                product: id === "price_trial" ? "prod_other" : "prod_plan",
+            }));
+
+            const response = await subscribe({
+                planId: plan._id.toString(),
+                type: "trial",
+                successUrl: "https://a",
+                cancelUrl: "https://b",
+            });
+
+            expect(response.statusCode).toBe(400);
+            expect(response.body.message).toBe(
+                "Trial price must belong to the same product as the recurring price",
+            );
+        });
+
         it("should return a 400 status code when the currencies differ", async () => {
             const plan = await seedPlanWithPrices({ trial: true });
             mockStripe.prices.retrieve.mockImplementation(async (id) =>
@@ -587,16 +612,25 @@ describe("POST /stripe/subscription", () => {
             });
         });
 
-        it("should create the subscription after a successful payment", async () => {
-            const plan = await seedPlanWithPrices();
-            mockStripe.paymentIntents.create.mockResolvedValue({
-                id: "pi_ok",
-                status: "succeeded",
-            });
+        // The subscription bills its first invoice itself; this is that invoice's intent.
+        const mockFirstInvoice = (subscription, paymentIntent) => {
             mockStripe.subscriptions.create.mockResolvedValue({
-                id: "sub_ok",
-                status: "active",
+                ...subscription,
+                latest_invoice: {
+                    payments: {
+                        data: [{ payment: { payment_intent: paymentIntent.id } }],
+                    },
+                },
             });
+            mockStripe.paymentIntents.update.mockResolvedValue(paymentIntent);
+        };
+
+        it("should bill the plan price on the subscription's first invoice", async () => {
+            const plan = await seedPlanWithPrices();
+            mockFirstInvoice(
+                { id: "sub_ok", status: "active" },
+                { id: "pi_ok", status: "succeeded" },
+            );
 
             const response = await subscribe({
                 planId: plan._id.toString(),
@@ -610,49 +644,41 @@ describe("POST /stripe/subscription", () => {
                 "Subscription created with saved card",
             );
             expect(response.body.data.subscriptionId).toBe("sub_ok");
+            expect(response.body.data.paymentIntentId).toBe("pi_ok");
             expect(response.body.data.paymentMethod).toEqual({
                 id: "pm_saved",
                 saved: true,
             });
             expect(mockStripe.checkout.sessions.create).not.toHaveBeenCalled();
-        });
+            expect(mockStripe.paymentIntents.create).not.toHaveBeenCalled();
 
-        it("should anchor the next billing cycle for a regular subscription", async () => {
-            const plan = await seedPlanWithPrices();
-            mockStripe.paymentIntents.create.mockResolvedValue({
-                id: "pi_ok",
-                status: "succeeded",
+            const params = mockStripe.subscriptions.create.mock.calls[0][0];
+            expect(params).toMatchObject({
+                customer: "cus_saved",
+                items: [{ price: "price_monthly", quantity: 1 }],
+                default_payment_method: "pm_saved",
+                off_session: true,
+                payment_behavior: "allow_incomplete",
             });
-            mockStripe.subscriptions.create.mockResolvedValue({
-                id: "sub_ok",
-                status: "active",
-            });
-
-            await subscribe({
-                planId: plan._id.toString(),
-                type: "monthly",
-                successUrl: "https://a",
-                cancelUrl: "https://b",
-            });
-
-            expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    proration_behavior: "none",
-                    billing_cycle_anchor: expect.any(Number),
-                }),
+            expect(params).not.toHaveProperty("add_invoice_items");
+            expect(params).not.toHaveProperty("billing_cycle_anchor");
+            expect(mockStripe.paymentIntents.update).toHaveBeenCalledWith(
+                "pi_ok",
+                {
+                    metadata: expect.objectContaining({
+                        subscriptionId: "sub_ok",
+                        flow: "one_click_subscription",
+                    }),
+                },
             );
         });
 
-        it("should charge the trial price first for a paid trial", async () => {
+        it("should bill the plan's trial price on the first invoice of a paid trial", async () => {
             const plan = await seedPlanWithPrices({ trial: true });
-            mockStripe.paymentIntents.create.mockResolvedValue({
-                id: "pi_ok",
-                status: "succeeded",
-            });
-            mockStripe.subscriptions.create.mockResolvedValue({
-                id: "sub_trial",
-                status: "trialing",
-            });
+            mockFirstInvoice(
+                { id: "sub_trial", status: "trialing" },
+                { id: "pi_ok", status: "succeeded" },
+            );
 
             const response = await subscribe({
                 planId: plan._id.toString(),
@@ -664,22 +690,26 @@ describe("POST /stripe/subscription", () => {
             expect(response.body.message).toBe(
                 "Paid + 3-day free trial subscription created with saved card",
             );
-            expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
-                expect.objectContaining({ amount: 100, currency: "eur" }),
-            );
             expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
-                expect.objectContaining({ trial_period_days: 3 }),
+                expect.objectContaining({
+                    items: [{ price: "price_monthly", quantity: 1 }],
+                    add_invoice_items: [{ price: "price_trial" }],
+                    trial_period_days: 3,
+                }),
             );
         });
 
-        it("should return the 3D Secure payload when the intent requires action", async () => {
+        it("should return the 3D Secure payload when the first invoice needs authentication", async () => {
             const plan = await seedPlanWithPrices();
-            mockStripe.paymentIntents.create.mockResolvedValue({
-                id: "pi_3ds",
-                status: "requires_action",
-                client_secret: "pi_3ds_secret",
-                payment_method: { id: "pm_new" },
-            });
+            mockFirstInvoice(
+                { id: "sub_3ds", status: "incomplete" },
+                {
+                    id: "pi_3ds",
+                    status: "requires_action",
+                    client_secret: "pi_3ds_secret",
+                    payment_method: { id: "pm_new" },
+                },
+            );
 
             const response = await subscribe({
                 planId: plan._id.toString(),
@@ -693,39 +723,12 @@ describe("POST /stripe/subscription", () => {
             expect(response.body.message).toBe(
                 "3D Secure authentication required for subscription",
             );
-            expect(response.body.data.subscriptionId).toBeNull();
             expect(response.body.data.status).toBe("incomplete");
             expect(response.body.data.requiresAction).toBe(true);
+            expect(response.body.data.paymentIntentId).toBe("pi_3ds");
+            expect(response.body.data.clientSecret).toBe("pi_3ds_secret");
             expect(response.body.data.paymentMethodId).toBe("pm_new");
-            expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
-        });
-
-        it("should return the 3D Secure payload when Stripe throws", async () => {
-            const plan = await seedPlanWithPrices();
-            const stripeError = new Error("authentication required");
-            stripeError.code = "authentication_required";
-            stripeError.raw = {
-                payment_intent: {
-                    id: "pi_thrown",
-                    status: "requires_action",
-                    client_secret: "pi_thrown_secret",
-                    payment_method: "pm_thrown",
-                },
-            };
-            mockStripe.paymentIntents.create.mockRejectedValue(stripeError);
-
-            const response = await subscribe({
-                planId: plan._id.toString(),
-                type: "monthly",
-                successUrl: "https://a",
-                cancelUrl: "https://b",
-            });
-
-            expect(response.body.message).toBe(
-                "3D Secure authentication required for subscription",
-            );
-            expect(response.body.data.paymentIntentId).toBe("pi_thrown");
-            expect(response.body.data.paymentMethodId).toBe("pm_thrown");
+            expect(mockStripe.subscriptions.cancel).not.toHaveBeenCalled();
         });
 
         it("should return a 404 status code when Stripe cannot find the price", async () => {
@@ -734,7 +737,7 @@ describe("POST /stripe/subscription", () => {
             stripeError.type = "StripeInvalidRequestError";
             stripeError.code = "resource_missing";
             stripeError.raw = { param: "price" };
-            mockStripe.paymentIntents.create.mockRejectedValue(stripeError);
+            mockStripe.subscriptions.create.mockRejectedValue(stripeError);
 
             const response = await subscribe({
                 planId: plan._id.toString(),
@@ -749,12 +752,12 @@ describe("POST /stripe/subscription", () => {
             );
         });
 
-        it("should fall through to a checkout session on an unexpected intent status", async () => {
+        it("should cancel the unpaid subscription and fall through to a checkout session", async () => {
             const plan = await seedPlanWithPrices();
-            mockStripe.paymentIntents.create.mockResolvedValue({
-                id: "pi_weird",
-                status: "canceled",
-            });
+            mockFirstInvoice(
+                { id: "sub_declined", status: "incomplete" },
+                { id: "pi_declined", status: "requires_payment_method" },
+            );
 
             const response = await subscribe({
                 planId: plan._id.toString(),
@@ -766,6 +769,9 @@ describe("POST /stripe/subscription", () => {
             expect(response.statusCode).toBe(200);
             expect(response.body.message).toBe(
                 "Subscription Checkout session created",
+            );
+            expect(mockStripe.subscriptions.cancel).toHaveBeenCalledWith(
+                "sub_declined",
             );
         });
     });

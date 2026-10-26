@@ -34,6 +34,4 @@ const DailyChallengeSchema = new mongoose.Schema(
     { timestamps: true },
 );
 
-DailyChallengeSchema.index({ date: 1 }, { unique: true });
-
 module.exports = mongoose.model("DailyChallenge", DailyChallengeSchema);

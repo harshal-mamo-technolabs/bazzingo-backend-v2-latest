@@ -62,6 +62,7 @@ const RECURRING_PRICE = {
     type: "recurring",
     unit_amount: 1999,
     currency: "eur",
+    product: "prod_plan",
 };
 
 const TRIAL_PRICE = {
@@ -70,6 +71,7 @@ const TRIAL_PRICE = {
     type: "one_time",
     unit_amount: 100,
     currency: "eur",
+    product: "prod_plan",
 };
 
 const SURVEY = {
@@ -220,6 +222,28 @@ describe("stripe elements subscription endpoints", () => {
             expect(res.status).toBe(400);
             expect(res.body.message).toBe(
                 "The trialPriceId must be a one-time price",
+            );
+        });
+
+        it("rejects a trial price from another product", async () => {
+            mockStripe.prices.retrieve.mockImplementation(async (id) =>
+                id === TRIAL_PRICE.id
+                    ? { ...TRIAL_PRICE, product: "prod_other" }
+                    : RECURRING_PRICE,
+            );
+
+            const res = await request(app)
+                .post("/stripe-elements/create-subscription")
+                .set("Authorization", `Bearer ${token}`)
+                .send({
+                    recurringPriceId: RECURRING_PRICE.id,
+                    withTrial: true,
+                    trialPriceId: TRIAL_PRICE.id,
+                });
+
+            expect(res.status).toBe(400);
+            expect(res.body.message).toBe(
+                "The trialPriceId must belong to the same product as the recurring price",
             );
         });
 
@@ -576,7 +600,7 @@ describe("stripe elements subscription endpoints", () => {
             expect(metadata).not.toHaveProperty("utm_email");
         });
 
-        it("creates a trial subscription with the trial fee invoice item", async () => {
+        it("bills the trial price on the first invoice of a trial subscription", async () => {
             await User.findByIdAndUpdate(user._id, {
                 flowId: "OLD_FLOW",
                 utmEmail: "old_email",
@@ -624,16 +648,19 @@ describe("stripe elements subscription endpoints", () => {
                 trialEnd: new Date(trialEnd * 1000).toISOString(),
             });
 
-            expect(mockStripe.invoiceItems.create).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    customer: "cus_1",
-                    amount: TRIAL_PRICE.unit_amount,
-                    currency: TRIAL_PRICE.currency,
-                    description: "4-day trial access",
-                }),
-            );
+            expect(mockStripe.invoiceItems.create).not.toHaveBeenCalled();
             expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
                 expect.objectContaining({
+                    customer: "cus_1",
+                    add_invoice_items: [
+                        {
+                            price: TRIAL_PRICE.id,
+                            metadata: expect.objectContaining({
+                                type: "trial_fee",
+                                trialPriceId: TRIAL_PRICE.id,
+                            }),
+                        },
+                    ],
                     trial_period_days: 4,
                     metadata: expect.objectContaining({
                         flow_id: "XHLfvC",

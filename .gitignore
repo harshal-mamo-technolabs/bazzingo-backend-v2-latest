@@ -6,3 +6,5 @@ coverage
 .env.production
 .DS_Store
 tools/assessments.html
+
+backup/

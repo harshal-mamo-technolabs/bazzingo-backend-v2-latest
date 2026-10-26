@@ -184,6 +184,33 @@ describe("POST /stripe/subscription/confirm", () => {
     });
 
     describe("given the payment intent succeeded", () => {
+        it("should return the one-click subscription the payment belongs to", async () => {
+            const plan = await seedPlan();
+            mockStripe.paymentIntents.retrieve.mockResolvedValue({
+                id: "pi_1",
+                status: "succeeded",
+                metadata: { subscriptionId: "sub_one_click" },
+            });
+            mockStripe.subscriptions.retrieve.mockResolvedValue({
+                id: "sub_one_click",
+                status: "active",
+            });
+
+            const response = await confirm({
+                paymentIntentId: "pi_1",
+                planId: plan._id.toString(),
+                type: "monthly",
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.data.subscriptionId).toBe("sub_one_click");
+            expect(response.body.data.status).toBe("active");
+            expect(mockStripe.subscriptions.retrieve).toHaveBeenCalledWith(
+                "sub_one_click",
+            );
+            expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
+        });
+
         it("should create a regular subscription", async () => {
             const plan = await seedPlan();
             mockStripe.paymentIntents.retrieve.mockResolvedValue({

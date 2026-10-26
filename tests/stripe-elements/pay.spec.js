@@ -8,6 +8,7 @@ jest.mock("../../src/config/stripe", () => ({ getStripe: () => mockStripe }));
 
 const { useInMemoryDatabase } = require("../utils/db");
 const { createUser, getAccessToken } = require("../utils/fixtures");
+const { mockPricePayment } = require("../utils/stripeMocks");
 const requestLogger = require("../../src/common/middlewares/requestLogger");
 const globalErrorHandler = require("../../src/common/middlewares/globalErrorHandler");
 const User = require("../../src/modules/user/userModel");
@@ -66,15 +67,15 @@ describe("POST /stripe-elements/pay", () => {
         expect(res.status).toBe(401);
     });
 
-    it("rejects a request without a usable amount source", async () => {
+    it("rejects a client-sent amount without a catalog price", async () => {
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
-            .send({ amount: 10 });
+            .send({ amount: 1 });
 
         expect(res.status).toBe(400);
         expect(res.body.message).toBe(
-            "Provide a valid priceCatalogId, or an integer `amount` of at least 50 (minor units / cents).",
+            "Provide an assessmentId or a one-time priceCatalogId",
         );
     });
 
@@ -102,16 +103,25 @@ describe("POST /stripe-elements/pay", () => {
         );
     });
 
+    it("rejects a recurring catalog price", async () => {
+        const price = await createPrice({ type: "recurring" });
+
+        const res = await request(app)
+            .post("/stripe-elements/pay")
+            .set("Authorization", `Bearer ${token}`)
+            .send({ priceCatalogId: String(price._id) });
+
+        expect(res.status).toBe(404);
+    });
+
     it("does not carry old email attribution into organic one-click purchases", async () => {
+        const price = await createPrice({ unitAmount: 1500 });
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",
             flowId: "OLD_FLOW",
             utmEmail: "Klaviyo",
         });
-        mockStripe.paymentIntents.create.mockResolvedValue({
-            id: "pi_regression",
-            status: "succeeded",
-        });
+        mockPricePayment(mockStripe, { id: "pi_regression", status: "succeeded" });
         for (const attribution of [
             {},
             { flow_id: "CURRENT_FLOW", utm_email: "Klaviyo" },
@@ -121,7 +131,7 @@ describe("POST /stripe-elements/pay", () => {
                 .post("/stripe-elements/pay")
                 .set("Authorization", `Bearer ${token}`)
                 .send({
-                    amount: 1500,
+                    priceCatalogId: String(price._id),
                     productName: "Assessment",
                     itemType: "assessment",
                     itemId: "assessment-1",
@@ -129,7 +139,7 @@ describe("POST /stripe-elements/pay", () => {
                 });
             expect(response.status).toBe(200);
             const metadata =
-                mockStripe.paymentIntents.create.mock.calls.at(-1)[0].metadata;
+                mockStripe.paymentIntents.update.mock.calls.at(-1)[1].metadata;
             expect(metadata).toMatchObject({
                 utm_source: "organic",
                 utm_campaign: "organic",
@@ -145,21 +155,19 @@ describe("POST /stripe-elements/pay", () => {
         expect((await User.findById(user._id)).flowId).toBe("OLD_FLOW");
     });
 
-    it("charges the saved card in one click", async () => {
+    it("charges the saved card in one click for the catalog price", async () => {
+        const price = await createPrice({ unitAmount: 1500, currency: "USD" });
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",
         });
-        mockStripe.paymentIntents.create.mockResolvedValue({
-            id: "pi_1",
-            status: "succeeded",
-        });
+        mockPricePayment(mockStripe, { id: "pi_1", status: "succeeded" });
 
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
             .send({
-                amount: 1500,
-                currency: "USD",
+                priceCatalogId: String(price._id),
+                amount: 1,
                 productName: "Credit pack",
                 itemType: "credit_pack",
                 itemId: "pack-1",
@@ -185,25 +193,28 @@ describe("POST /stripe-elements/pay", () => {
         expect(order.productName).toBe("Credit pack");
         expect(order.description).toBe("Ten credits");
 
-        expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
+        expect(mockStripe.invoiceItems.create).toHaveBeenCalledWith(
             expect.objectContaining({
-                amount: 1500,
-                currency: "usd",
                 customer: "cus_1",
-                payment_method: "pm_1",
-                confirm: true,
-                off_session: true,
-                description: "Ten credits",
-                payment_method_types: ["card"],
+                pricing: { price: price.stripePriceId },
             }),
+        );
+        expect(mockStripe.invoices.pay).toHaveBeenCalledWith("in_1", {
+            payment_method: "pm_1",
+            off_session: true,
+        });
+        expect(mockStripe.paymentIntents.update).toHaveBeenCalledWith(
+            "pi_1",
+            expect.objectContaining({ description: "Ten credits" }),
         );
     });
 
     it("asks for 3d secure when the off session charge needs it", async () => {
+        const price = await createPrice();
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",
         });
-        mockStripe.paymentIntents.create.mockResolvedValue({
+        mockPricePayment(mockStripe, {
             id: "pi_1",
             status: "requires_action",
             client_secret: "pi_1_secret",
@@ -212,7 +223,7 @@ describe("POST /stripe-elements/pay", () => {
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
-            .send({ amount: 1500 });
+            .send({ priceCatalogId: String(price._id) });
 
         expect(res.status).toBe(200);
         expect(res.body.status).toBe("requires_action");
@@ -227,18 +238,16 @@ describe("POST /stripe-elements/pay", () => {
     });
 
     it("returns pending for any other off session status", async () => {
+        const price = await createPrice();
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",
         });
-        mockStripe.paymentIntents.create.mockResolvedValue({
-            id: "pi_1",
-            status: "processing",
-        });
+        mockPricePayment(mockStripe, { id: "pi_1", status: "processing" });
 
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
-            .send({ amount: 1500 });
+            .send({ priceCatalogId: String(price._id) });
 
         expect(res.status).toBe(200);
         expect(res.body.status).toBe("pending");
@@ -250,27 +259,27 @@ describe("POST /stripe-elements/pay", () => {
         });
     });
 
-    it("recovers the client secret from an authentication error", async () => {
+    it("recovers the client secret when the invoice payment needs authentication", async () => {
+        const price = await createPrice();
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",
         });
-        mockStripe.paymentIntents.create.mockRejectedValue(
-            Object.assign(new Error("authentication required"), {
-                code: "authentication_required",
-                raw: {
-                    payment_intent: {
-                        id: "pi_3ds",
-                        client_secret: "pi_3ds_secret",
-                        status: "requires_action",
-                    },
-                },
+        mockPricePayment(mockStripe, {
+            id: "pi_3ds",
+            client_secret: "pi_3ds_secret",
+            status: "requires_action",
+        });
+        mockStripe.invoices.pay.mockRejectedValue(
+            Object.assign(new Error("requires action"), {
+                type: "StripeCardError",
+                code: "invoice_payment_intent_requires_action",
             }),
         );
 
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
-            .send({ amount: 1500 });
+            .send({ priceCatalogId: String(price._id) });
 
         expect(res.status).toBe(200);
         expect(res.body.status).toBe("requires_action");
@@ -279,32 +288,34 @@ describe("POST /stripe-elements/pay", () => {
             paymentIntentId: "pi_3ds",
             clientSecret: "pi_3ds_secret",
         });
+        expect(mockStripe.invoices.voidInvoice).not.toHaveBeenCalled();
 
         const order = await Order.findOne({ userId: user._id }).lean();
         expect(order.status).toBe("requires_action");
         expect(order.stripePaymentIntentId).toBe("pi_3ds");
     });
 
-    it("falls back to collecting a card after a hard decline", async () => {
+    it("voids the declined invoice and falls back to collecting a card", async () => {
+        const price = await createPrice({ unitAmount: 1500 });
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",
         });
-        mockStripe.paymentIntents.create
-            .mockRejectedValueOnce(
-                Object.assign(new Error("Your card was declined."), {
-                    type: "StripeCardError",
-                    code: "card_declined",
-                }),
-            )
-            .mockResolvedValueOnce({
-                id: "pi_collect",
-                client_secret: "pi_collect_secret",
-            });
+        mockPricePayment(mockStripe, {
+            id: "pi_collect",
+            client_secret: "pi_collect_secret",
+            status: "requires_payment_method",
+        });
+        mockStripe.invoices.pay.mockRejectedValue(
+            Object.assign(new Error("Your card was declined."), {
+                type: "StripeCardError",
+                code: "card_declined",
+            }),
+        );
 
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
-            .send({ amount: 1500 });
+            .send({ priceCatalogId: String(price._id) });
 
         expect(res.status).toBe(200);
         expect(res.body.status).toBe("success");
@@ -319,13 +330,16 @@ describe("POST /stripe-elements/pay", () => {
             amount: 1500,
             currency: "eur",
         });
+        expect(mockStripe.invoices.voidInvoice).toHaveBeenCalledWith("in_1");
+        expect(mockStripe.invoices.create).toHaveBeenCalledTimes(2);
 
         const order = await Order.findOne({ userId: user._id }).lean();
         expect(order.status).toBe("requires_payment_method");
     });
 
     it("collects a card when there is no saved payment method", async () => {
-        mockStripe.paymentIntents.create.mockResolvedValue({
+        const price = await createPrice();
+        mockPricePayment(mockStripe, {
             id: "pi_collect",
             client_secret: "pi_collect_secret",
         });
@@ -333,16 +347,14 @@ describe("POST /stripe-elements/pay", () => {
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
-            .send({ amount: 1500 });
+            .send({ priceCatalogId: String(price._id) });
 
         expect(res.status).toBe(200);
         expect(res.body.data.outcome).toBe("collect_payment_method");
-        expect(mockStripe.paymentIntents.create).toHaveBeenCalledTimes(1);
-        expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
-            expect.objectContaining({
-                setup_future_usage: "off_session",
-                payment_method_types: ["card"],
-            }),
+        expect(mockStripe.invoices.pay).not.toHaveBeenCalled();
+        expect(mockStripe.paymentIntents.update).toHaveBeenCalledWith(
+            "pi_collect",
+            expect.objectContaining({ setup_future_usage: "off_session" }),
         );
     });
 
@@ -353,14 +365,11 @@ describe("POST /stripe-elements/pay", () => {
             subcategories: ["logic"],
             stripeProductId: "prod_full",
         });
-        await createPrice({ default: true });
+        const price = await createPrice({ default: true });
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",
         });
-        mockStripe.paymentIntents.create.mockResolvedValue({
-            id: "pi_1",
-            status: "succeeded",
-        });
+        mockPricePayment(mockStripe, { id: "pi_1", status: "succeeded" });
 
         const res = await request(app)
             .post("/stripe-elements/pay")
@@ -373,6 +382,9 @@ describe("POST /stripe-elements/pay", () => {
             amount: 999,
             currency: "eur",
         });
+        expect(mockStripe.invoiceItems.create).toHaveBeenCalledWith(
+            expect.objectContaining({ pricing: { price: price.stripePriceId } }),
+        );
 
         const order = await Order.findOne({ userId: user._id }).lean();
         expect(String(order.assessmentId)).toBe(String(assessment._id));
@@ -380,13 +392,15 @@ describe("POST /stripe-elements/pay", () => {
         expect(order.itemId).toBe(String(assessment._id));
     });
 
-    it("returns a server error when the collect intent cannot be created", async () => {
-        mockStripe.paymentIntents.create.mockRejectedValue(new Error("boom"));
+    it("returns a server error when the collect invoice cannot be created", async () => {
+        const price = await createPrice();
+        mockPricePayment(mockStripe, { id: "pi_1" });
+        mockStripe.invoices.create.mockRejectedValue(new Error("boom"));
 
         const res = await request(app)
             .post("/stripe-elements/pay")
             .set("Authorization", `Bearer ${token}`)
-            .send({ amount: 1500 });
+            .send({ priceCatalogId: String(price._id) });
 
         expect(res.status).toBe(500);
         expect(res.body.message).toBe("Something went wrong");

@@ -100,8 +100,7 @@ const STRIPE_FLOWS = {
     SUBSCRIPTION_CUSTOMER: "subscription_checkout_flow",
     SUBSCRIPTION_CHECKOUT: "subscription_checkout",
     PAID_TRIAL_CHECKOUT: "paid_trial_checkout",
-    ONE_CLICK_SUBSCRIPTION_MANUAL_PI: "one_click_subscription_manual_pi",
-    ONE_CLICK_SUBSCRIPTION_AFTER_PI: "one_click_subscription_after_pi",
+    ONE_CLICK_SUBSCRIPTION: "one_click_subscription",
     CONFIRMED_AFTER_3DS: "confirmed_after_3ds",
 };
 
@@ -258,6 +257,8 @@ const STRIPE_MESSAGES = {
     TRIAL_PRICE_INACTIVE: "Trial price is inactive",
     RECURRING_PRICE_NOT_RECURRING: "Recurring price must be a recurring price",
     TRIAL_PRICE_NOT_ONE_TIME: "Trial price must be a one-time price",
+    TRIAL_PRICE_OTHER_PRODUCT:
+        "Trial price must belong to the same product as the recurring price",
     CURRENCY_MISMATCH: "Currency mismatch between recurring and trial prices",
     SUBSCRIPTION_THREE_D_SECURE_REQUIRED:
         "3D Secure authentication required for subscription",

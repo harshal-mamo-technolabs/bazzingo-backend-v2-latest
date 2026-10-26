@@ -249,6 +249,13 @@ class StripeElementsController {
                         STRIPE_ELEMENTS_MESSAGES.TRIAL_PRICE_TYPE,
                     );
                 }
+
+                if (trialPrice.product !== recurringPrice.product) {
+                    throw createHttpError(
+                        400,
+                        STRIPE_ELEMENTS_MESSAGES.TRIAL_PRICE_PRODUCT,
+                    );
+                }
             }
 
             const customerId =
@@ -1842,8 +1849,6 @@ class StripeElementsController {
         const {
             assessmentId,
             priceCatalogId,
-            amount,
-            currency,
             productName,
             description,
             itemType,
@@ -1887,6 +1892,7 @@ class StripeElementsController {
                     ).toLowerCase(),
                     productName: context.assessmentDisplayName,
                     priceCatalogId: price._id,
+                    stripePriceId: price.stripePriceId,
                 };
                 orderAssessmentId = context.orderAssessmentId;
                 assessmentKind = context.assessmentKind;
@@ -1897,7 +1903,7 @@ class StripeElementsController {
             } else {
                 charge =
                     await this.stripeElementsService.resolveGenericChargeAmount(
-                        { priceCatalogId, amount, currency, productName },
+                        { priceCatalogId, productName },
                     );
             }
 

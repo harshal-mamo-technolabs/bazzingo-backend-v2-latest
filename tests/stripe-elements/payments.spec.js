@@ -8,6 +8,7 @@ jest.mock("../../src/config/stripe", () => ({ getStripe: () => mockStripe }));
 
 const { useInMemoryDatabase } = require("../utils/db");
 const { createUser, getAccessToken } = require("../utils/fixtures");
+const { mockPricePayment } = require("../utils/stripeMocks");
 const requestLogger = require("../../src/common/middlewares/requestLogger");
 const globalErrorHandler = require("../../src/common/middlewares/globalErrorHandler");
 const User = require("../../src/modules/user/userModel");
@@ -74,7 +75,7 @@ describe("stripe elements one time payment endpoints", () => {
     describe("POST /stripe-elements/create-payment", () => {
         beforeEach(() => {
             mockStripe.customers.create.mockResolvedValue({ id: "cus_new" });
-            mockStripe.paymentIntents.create.mockResolvedValue({
+            mockPricePayment(mockStripe, {
                 id: "pi_1",
                 client_secret: "pi_1_secret",
             });
@@ -143,7 +144,7 @@ describe("stripe elements one time payment endpoints", () => {
                 });
             expect(response.status).toBe(200);
             expect(
-                mockStripe.paymentIntents.create.mock.calls[0][0].metadata,
+                mockStripe.paymentIntents.update.mock.calls[0][1].metadata,
             ).toMatchObject({
                 utm_source: "google",
                 utm_campaign: "organic",
@@ -186,14 +187,17 @@ describe("stripe elements one time payment endpoints", () => {
             const saved = await User.findById(user._id).lean();
             expect(saved.stripeCustomerId).toBe("cus_new");
 
-            expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
+            expect(mockStripe.invoiceItems.create).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    amount: 999,
-                    currency: "eur",
                     customer: "cus_new",
+                    pricing: { price: price.stripePriceId },
+                }),
+            );
+            expect(mockStripe.paymentIntents.update).toHaveBeenCalledWith(
+                "pi_1",
+                expect.objectContaining({
                     description: "Assessment: iq-test",
                     setup_future_usage: "off_session",
-                    payment_method_types: ["card"],
                 }),
             );
         });
@@ -316,7 +320,7 @@ describe("stripe elements one time payment endpoints", () => {
         it("maps an invalid stripe request to a bad request", async () => {
             const assessment = await createFullAssessment();
             await createPrice({ default: true });
-            mockStripe.paymentIntents.create.mockRejectedValue(
+            mockStripe.invoices.create.mockRejectedValue(
                 stripeError("Amount too small", {
                     type: "StripeInvalidRequestError",
                 }),
@@ -334,9 +338,7 @@ describe("stripe elements one time payment endpoints", () => {
         it("returns a server error when stripe fails unexpectedly", async () => {
             const assessment = await createFullAssessment();
             await createPrice({ default: true });
-            mockStripe.paymentIntents.create.mockRejectedValue(
-                new Error("boom"),
-            );
+            mockStripe.invoices.create.mockRejectedValue(new Error("boom"));
 
             const res = await request(app)
                 .post("/stripe-elements/create-payment")
@@ -716,7 +718,7 @@ describe("stripe elements one time payment endpoints", () => {
                 stripeCustomerId: "cus_1",
                 defaultPaymentMethodId: "pm_1",
             });
-            mockStripe.paymentIntents.create.mockResolvedValue({
+            mockPricePayment(mockStripe, {
                 id: "pi_1",
                 status: "succeeded",
                 client_secret: "pi_1_secret",
@@ -796,7 +798,7 @@ describe("stripe elements one time payment endpoints", () => {
         });
 
         it("charges the saved card", async () => {
-            await createPrice({ default: true });
+            const price = await createPrice({ default: true });
 
             const res = await request(app)
                 .post("/stripe-elements/quick-pay")
@@ -818,20 +820,21 @@ describe("stripe elements one time payment endpoints", () => {
                 assessmentName: "iq-test",
             });
 
-            expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
+            expect(mockStripe.invoiceItems.create).toHaveBeenCalledWith(
                 expect.objectContaining({
                     customer: "cus_1",
-                    payment_method: "pm_1",
-                    confirm: true,
-                    off_session: true,
-                    payment_method_types: ["card"],
+                    pricing: { price: price.stripePriceId },
                 }),
             );
+            expect(mockStripe.invoices.pay).toHaveBeenCalledWith("in_1", {
+                payment_method: "pm_1",
+                off_session: true,
+            });
         });
 
         it("reports when additional authentication is required", async () => {
             await createPrice({ default: true });
-            mockStripe.paymentIntents.create.mockResolvedValue({
+            mockPricePayment(mockStripe, {
                 id: "pi_1",
                 status: "requires_action",
                 client_secret: "pi_1_secret",
@@ -858,7 +861,7 @@ describe("stripe elements one time payment endpoints", () => {
 
         it("maps a declined card to a bad request", async () => {
             await createPrice({ default: true });
-            mockStripe.paymentIntents.create.mockRejectedValue(
+            mockStripe.invoices.pay.mockRejectedValue(
                 stripeError("Your card was declined.", {
                     type: "StripeCardError",
                     code: "card_declined",
@@ -876,9 +879,7 @@ describe("stripe elements one time payment endpoints", () => {
 
         it("returns a server error when stripe fails unexpectedly", async () => {
             await createPrice({ default: true });
-            mockStripe.paymentIntents.create.mockRejectedValue(
-                new Error("boom"),
-            );
+            mockStripe.invoices.pay.mockRejectedValue(new Error("boom"));
 
             const res = await request(app)
                 .post("/stripe-elements/quick-pay")

@@ -10,6 +10,7 @@ const Order = require("../../src/modules/stripe/orderModel");
 const User = require("../../src/modules/user/userModel");
 const { useInMemoryDatabase } = require("../utils/db");
 const { createUser, getAccessToken } = require("../utils/fixtures");
+const { mockPricePayment } = require("../utils/stripeMocks");
 
 const mockStripe = {
     prices: { create: jest.fn(), retrieve: jest.fn() },
@@ -332,10 +333,16 @@ describe("POST /stripe/checkout/session", () => {
             });
         });
 
-        it("should return a 200 status code when the payment succeeds", async () => {
+        const authenticationError = () =>
+            Object.assign(new Error("requires action"), {
+                type: "StripeCardError",
+                code: "invoice_payment_intent_requires_action",
+            });
+
+        it("should charge the catalog price with the saved card", async () => {
             const assessment = await seedAssessment();
-            await seedPrice(assessment._id);
-            mockStripe.paymentIntents.create.mockResolvedValue({
+            const price = await seedPrice(assessment._id);
+            mockPricePayment(mockStripe, {
                 id: "pi_1",
                 status: "succeeded",
                 client_secret: "pi_1_secret",
@@ -355,12 +362,22 @@ describe("POST /stripe/checkout/session", () => {
             expect(response.body.data.clientSecret).toBe("pi_1_secret");
             expect(response.body.data.status).toBe("succeeded");
             expect(mockStripe.checkout.sessions.create).not.toHaveBeenCalled();
+            expect(mockStripe.invoiceItems.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    customer: "cus_saved",
+                    pricing: { price: price.stripePriceId },
+                }),
+            );
+            expect(mockStripe.invoices.pay).toHaveBeenCalledWith("in_1", {
+                payment_method: "pm_saved",
+                off_session: true,
+            });
         });
 
         it("should mark the order as processing for a pending payment", async () => {
             const assessment = await seedAssessment();
             await seedPrice(assessment._id);
-            mockStripe.paymentIntents.create.mockResolvedValue({
+            mockPricePayment(mockStripe, {
                 id: "pi_2",
                 status: "processing",
                 client_secret: "pi_2_secret",
@@ -378,17 +395,13 @@ describe("POST /stripe/checkout/session", () => {
         it("should return the requires_action envelope when 3D Secure is needed", async () => {
             const assessment = await seedAssessment();
             await seedPrice(assessment._id);
-            const stripeError = new Error("authentication required");
-            stripeError.code = "authentication_required";
-            stripeError.raw = {
-                payment_intent: {
-                    id: "pi_3ds",
-                    status: "requires_action",
-                    client_secret: "pi_3ds_secret",
-                    payment_method: "pm_3ds",
-                },
-            };
-            mockStripe.paymentIntents.create.mockRejectedValue(stripeError);
+            mockPricePayment(mockStripe, {
+                id: "pi_3ds",
+                status: "requires_action",
+                client_secret: "pi_3ds_secret",
+                payment_method: "pm_3ds",
+            });
+            mockStripe.invoices.pay.mockRejectedValue(authenticationError());
 
             const response = await checkout({
                 assessmentId: assessment._id.toString(),
@@ -404,6 +417,7 @@ describe("POST /stripe/checkout/session", () => {
             expect(response.body.data.requiresAction).toBe(true);
             expect(response.body.data.clientSecret).toBe("pi_3ds_secret");
             expect(response.body.data.paymentMethodId).toBe("pm_3ds");
+            expect(mockStripe.invoices.voidInvoice).not.toHaveBeenCalled();
 
             const order = await Order.findById(
                 response.body.data.orderId,
@@ -416,20 +430,19 @@ describe("POST /stripe/checkout/session", () => {
         it("should retrieve the payment method when the intent does not carry one", async () => {
             const assessment = await seedAssessment();
             await seedPrice(assessment._id);
-            const stripeError = new Error("authentication required");
-            stripeError.code = "authentication_required";
-            stripeError.raw = {
-                payment_intent: {
-                    id: "pi_3ds",
-                    status: "requires_action",
-                    client_secret: "pi_3ds_secret",
-                },
-            };
-            mockStripe.paymentIntents.create.mockRejectedValue(stripeError);
-            mockStripe.paymentIntents.retrieve.mockResolvedValue({
+            const pending = {
                 id: "pi_3ds",
-                payment_method: { id: "pm_fresh" },
-            });
+                status: "requires_action",
+                client_secret: "pi_3ds_secret",
+            };
+            mockPricePayment(mockStripe, pending);
+            mockStripe.invoices.pay.mockRejectedValue(authenticationError());
+            mockStripe.paymentIntents.retrieve
+                .mockResolvedValueOnce(pending)
+                .mockResolvedValueOnce({
+                    id: "pi_3ds",
+                    payment_method: { id: "pm_fresh" },
+                });
 
             const response = await checkout({
                 assessmentId: assessment._id.toString(),
@@ -443,19 +456,16 @@ describe("POST /stripe/checkout/session", () => {
         it("should fall back to the saved payment method when the retrieve fails", async () => {
             const assessment = await seedAssessment();
             await seedPrice(assessment._id);
-            const stripeError = new Error("authentication required");
-            stripeError.code = "authentication_required";
-            stripeError.raw = {
-                payment_intent: {
-                    id: "pi_3ds",
-                    status: "requires_action",
-                    client_secret: "pi_3ds_secret",
-                },
+            const pending = {
+                id: "pi_3ds",
+                status: "requires_action",
+                client_secret: "pi_3ds_secret",
             };
-            mockStripe.paymentIntents.create.mockRejectedValue(stripeError);
-            mockStripe.paymentIntents.retrieve.mockRejectedValue(
-                new Error("nope"),
-            );
+            mockPricePayment(mockStripe, pending);
+            mockStripe.invoices.pay.mockRejectedValue(authenticationError());
+            mockStripe.paymentIntents.retrieve
+                .mockResolvedValueOnce(pending)
+                .mockRejectedValueOnce(new Error("nope"));
 
             const response = await checkout({
                 assessmentId: assessment._id.toString(),
@@ -466,10 +476,14 @@ describe("POST /stripe/checkout/session", () => {
             expect(response.body.data.paymentMethodId).toBe("pm_saved");
         });
 
-        it("should fall through to a checkout session for other failures", async () => {
+        it("should void the declined invoice and fall through to a checkout session", async () => {
             const assessment = await seedAssessment();
             await seedPrice(assessment._id);
-            mockStripe.paymentIntents.create.mockRejectedValue(
+            mockPricePayment(mockStripe, {
+                id: "pi_declined",
+                status: "requires_payment_method",
+            });
+            mockStripe.invoices.pay.mockRejectedValue(
                 new Error("card declined"),
             );
 
@@ -481,6 +495,7 @@ describe("POST /stripe/checkout/session", () => {
 
             expect(response.statusCode).toBe(200);
             expect(response.body.message).toBe("Checkout session created");
+            expect(mockStripe.invoices.voidInvoice).toHaveBeenCalledWith("in_1");
         });
     });
 

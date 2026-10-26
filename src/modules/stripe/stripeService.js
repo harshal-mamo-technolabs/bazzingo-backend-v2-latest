@@ -2,6 +2,7 @@
         const createHttpError = require("http-errors");
         const { config } = require("../../config");
         const { persistUtmDefaults, buildUtmMetadata, buildPurchaseAttributionMetadata } = require("../../common/utils/utmParams");
+        const { createPricePayment } = require("../../common/utils/stripePricePayment");
         const {
             RESPONSE_STATUS,
             ORDER_STATUSES,
@@ -673,13 +674,10 @@
 
             async tryOneClickPayment({ user, order, price, assessment }) {
                 try {
-                    const paymentIntent = await this.stripe.paymentIntents.create({
-                        amount: price.unitAmount,
-                        currency: price.currency.toLowerCase(),
-                        customer: user.stripeCustomerId,
-                        payment_method: user.defaultPaymentMethodId,
-                        confirm: true,
-                        off_session: true,
+                    const paymentIntent = await createPricePayment(this.stripe, {
+                        customerId: user.stripeCustomerId,
+                        priceId: price.stripePriceId,
+                        paymentMethodId: user.defaultPaymentMethodId,
                         description:
                             STRIPE_MESSAGE_BUILDERS.assessmentPurchaseDescription(
                                 assessment.mainCategory,
@@ -694,10 +692,6 @@
                             },
                             user,
                         ),
-                        automatic_payment_methods: {
-                            enabled: true,
-                            allow_redirects: "never",
-                        },
                     });
 
                     order.status =
@@ -868,6 +862,13 @@
                     );
                 }
 
+                if (trialPrice && trialPrice.product !== recurringPrice.product) {
+                    throw createHttpError(
+                        400,
+                        STRIPE_MESSAGES.TRIAL_PRICE_OTHER_PRODUCT,
+                    );
+                }
+
                 const recurringCurrency = (recurringPrice.currency || "").toLowerCase();
 
                 if (trialPrice) {
@@ -1022,34 +1023,44 @@
                 planInfo,
             }) {
                 try {
-                    const paymentIntent = await this.stripe.paymentIntents.create({
-                        amount: trialHonored
-                            ? trialPrice.unit_amount
-                            : recurringPrice.unit_amount,
-                        currency: recurringPrice.currency,
-                        customer: user.stripeCustomerId,
-                        payment_method: user.defaultPaymentMethodId,
-                        confirmation_method: "automatic",
-                        confirm: true,
-                        off_session: true,
-                        description: STRIPE_MESSAGE_BUILDERS.subscriptionDescription(
-                            plan.name,
+                    const metadata = mergeUtmMetadata(
+                        {
+                            userId: String(user._id),
+                            planId: String(planId),
+                            subscriptionType: type,
                             recurringCadence,
-                        ),
-                        metadata: mergeUtmMetadata(
-                            {
-                                userId: String(user._id),
-                                planId: String(planId),
-                                subscriptionType: type,
-                                recurringCadence,
-                                trialRequested: String(trialRequested),
-                                trialHonored: String(trialHonored),
-                                freeTrialDays: String(freeTrialDays ?? 0),
-                                flow: STRIPE_FLOWS.ONE_CLICK_SUBSCRIPTION_MANUAL_PI,
-                            },
-                            user,
-                        ),
+                            trialRequested: String(trialRequested),
+                            trialHonored: String(trialHonored),
+                            freeTrialDays: String(freeTrialDays ?? 0),
+                            flow: STRIPE_FLOWS.ONE_CLICK_SUBSCRIPTION,
+                        },
+                        user,
+                    );
+
+                    // The first invoice carries the plan's own prices (trial fee or
+                    // first period), so Stripe links the sale to its product.
+                    const stripeSubscription = await this.stripe.subscriptions.create({
+                        customer: user.stripeCustomerId,
+                        items: [{ price: recurringPriceId, quantity: 1 }],
+                        ...(trialHonored
+                            ? {
+                                  add_invoice_items: [{ price: trialPrice.id }],
+                                  trial_period_days: freeTrialDays,
+                              }
+                            : {}),
+                        default_payment_method: user.defaultPaymentMethodId,
+                        off_session: true,
+                        payment_behavior: "allow_incomplete",
+                        metadata,
+                        expand: ["latest_invoice.payments"],
                     });
+
+                    // confirmSubscription finds this subscription again after 3-D Secure.
+                    const paymentIntent = await this.stripe.paymentIntents.update(
+                        stripeSubscription.latest_invoice.payments.data[0].payment
+                            .payment_intent,
+                        { metadata: { ...metadata, subscriptionId: stripeSubscription.id } },
+                    );
 
                     if (
                         paymentIntent.status ===
@@ -1069,45 +1080,14 @@
                         paymentIntent.status !==
                         STRIPE_PAYMENT_INTENT_STATUSES.SUCCEEDED
                     ) {
+                        await this.stripe.subscriptions.cancel(stripeSubscription.id);
+
                         throw new Error(
                             STRIPE_MESSAGE_BUILDERS.unexpectedPaymentIntentStatus(
                                 paymentIntent.status,
                             ),
                         );
                     }
-
-                    const subscriptionParams = {
-                        customer: user.stripeCustomerId,
-                        items: [{ price: recurringPriceId, quantity: 1 }],
-                        default_payment_method: user.defaultPaymentMethodId,
-                        metadata: mergeUtmMetadata(
-                            {
-                                userId: String(user._id),
-                                planId: String(planId),
-                                subscriptionType: type,
-                                recurringCadence,
-                                trialRequested: String(trialRequested),
-                                trialHonored: String(trialHonored),
-                                freeTrialDays: String(freeTrialDays ?? 0),
-                                flow: STRIPE_FLOWS.ONE_CLICK_SUBSCRIPTION_AFTER_PI,
-                                paymentIntentId: paymentIntent.id,
-                                firstPaymentCompleted: "true",
-                            },
-                            user,
-                        ),
-                    };
-
-                    if (trialHonored) {
-                        subscriptionParams.trial_period_days = freeTrialDays;
-                    } else {
-                        subscriptionParams.billing_cycle_anchor = Math.floor(
-                            addCadence(new Date(), recurringCadence).getTime() / 1000,
-                        );
-                        subscriptionParams.proration_behavior = "none";
-                    }
-
-                    const stripeSubscription =
-                        await this.stripe.subscriptions.create(subscriptionParams);
 
                     this.logger.info("Subscription created with a saved card", {
                         userId: String(user._id),
@@ -1197,6 +1177,25 @@
                     const trialRequested = metadata.trialRequested === "true";
                     const trialHonored = metadata.trialHonored === "true";
                     const freeTrialDays = parseInt(metadata.freeTrialDays, 10) || 0;
+                    const planInfo = {
+                        id: plan._id,
+                        name: plan.name,
+                        type,
+                        recurringCadence,
+                        paidTrial: Boolean(metadata.trialPriceId),
+                        freeTrialDays,
+                        trialRequested,
+                        trialHonored,
+                    };
+
+                    if (metadata.subscriptionId) {
+                        const stripeSubscription =
+                            await this.stripe.subscriptions.retrieve(
+                                metadata.subscriptionId,
+                            );
+
+                        return { kind: "created", stripeSubscription, paymentIntent, planInfo };
+                    }
 
                     let recurringPriceRef = null;
 
@@ -1264,16 +1263,7 @@
                         kind: "created",
                         stripeSubscription,
                         paymentIntent,
-                        planInfo: {
-                            id: plan._id,
-                            name: plan.name,
-                            type,
-                            recurringCadence,
-                            paidTrial: Boolean(metadata.trialPriceId),
-                            freeTrialDays,
-                            trialRequested,
-                            trialHonored,
-                        },
+                        planInfo,
                     };
                 } catch (error) {
                     this.logger.error("Subscription confirmation failed", {

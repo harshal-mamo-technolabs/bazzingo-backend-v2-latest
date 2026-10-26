@@ -196,6 +196,13 @@ const UserSchema = new mongoose.Schema(
             unique: true,
             sparse: true,
         },
+        // Which signup flow created the account; Google and landing page signups are email-based.
+        signupType: {
+            type: String,
+            enum: ["email", "msisdn"],
+            default: "email",
+            index: true,
+        },
         isDeleted: {
             type: Boolean,
             default: false,

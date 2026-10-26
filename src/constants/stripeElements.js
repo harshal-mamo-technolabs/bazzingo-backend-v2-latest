@@ -10,6 +10,8 @@ const STRIPE_ELEMENTS_MESSAGES = {
     RECURRING_PRICE_TYPE: "The recurringPriceId must be a recurring price",
     TRIAL_PRICE_INACTIVE: "The specified trial price is not active",
     TRIAL_PRICE_TYPE: "The trialPriceId must be a one-time price",
+    TRIAL_PRICE_PRODUCT:
+        "The trialPriceId must belong to the same product as the recurring price",
     SETUP_INTENT_CREATED:
         "SetupIntent created. Collect card details and confirm, then call /activate-subscription.",
     SETUP_INTENT_FAILED: "Failed to create SetupIntent",
@@ -89,8 +91,8 @@ const STRIPE_ELEMENTS_MESSAGES = {
     PRICE_CATALOG_NOT_FOUND: "priceCatalogId not found or not active",
     BELOW_STRIPE_MINIMUM:
         "Resolved price is below the Stripe minimum (50 cents)",
-    AMOUNT_INVALID:
-        "Provide a valid priceCatalogId, or an integer `amount` of at least 50 (minor units / cents).",
+    PRICE_CATALOG_ID_REQUIRED:
+        "Provide an assessmentId or a one-time priceCatalogId",
     PAYMENT_SUCCESSFUL: "Payment successful",
     COLLECT_PAYMENT_METHOD:
         "Enter card details to complete payment. Your card will be saved for one-click next time.",
@@ -126,7 +128,6 @@ const STRIPE_ELEMENTS_DYNAMIC_MESSAGES = {
         `cancelReason must be at most ${max} characters`,
     stayIfOfferedTooLong: (max) =>
         `wouldHaveStayedIfOffered is too large when stored (max ${max} characters serialized)`,
-    trialAccessDescription: (trialDays) => `${trialDays}-day trial access`,
     assessmentDescription: (name) => `Assessment: ${name}`,
 };
 
