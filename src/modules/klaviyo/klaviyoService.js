@@ -50,6 +50,17 @@ const normalizeEmail = (email) =>
         ? email.trim().toLowerCase()
         : null;
 
+const profilePropertyName = (name) => {
+    const key = name
+        .replace(/^bazzingo:/i, "")
+        .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+        .replace(/[^a-zA-Z0-9_]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .toLowerCase();
+
+    return `bazzingo:${["source", "campaign", "medium"].includes(key) ? `utm_${key}` : key}`;
+};
+
 const splitName = (name) => {
     if (!name || typeof name !== "string") {
         return { firstName: undefined, lastName: undefined };
@@ -473,9 +484,12 @@ class KlaviyoService {
         }
 
         const { firstName, lastName } = splitName(name);
-        const safeProperties = sanitizeProperties(properties);
-
-        safeProperties[KLAVIYO_API.BAZZINGO_PROPERTY] = true;
+        const safeProperties = Object.fromEntries(
+            Object.entries({
+                ...sanitizeProperties(properties),
+                [KLAVIYO_API.BAZZINGO_PROPERTY]: true,
+            }).map(([key, value]) => [profilePropertyName(key), value]),
+        );
 
         try {
             await this.saveBackup({

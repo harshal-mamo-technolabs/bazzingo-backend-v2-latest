@@ -9,13 +9,12 @@ const OrderSchema = new Schema(
             index: true,
             required: true,
         },
+        // Points at a FullAssessment, AdhdAssessment or an
+        // EmotionalIntelligenceAssessment; only the first can be populated, so
+        // callers spanning all three must look the id up per collection.
         assessmentId: {
             type: Schema.Types.ObjectId,
             ref: "FullAssessment",
-            index: true,
-        } || {
-            type: Schema.Types.ObjectId,
-            ref: "AdhdAssessment",
             index: true,
         },
         priceCatalogId: {

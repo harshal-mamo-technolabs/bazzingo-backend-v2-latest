@@ -122,6 +122,35 @@ describe("stripe elements one time payment endpoints", () => {
             );
         });
 
+        it("keeps saved attribution on assessment payments after an email visit", async () => {
+            const buyer = await createUser({
+                email: "buyer@bazzingo.com",
+                utmSource: "google",
+                utmCampaign: "brand",
+                utmMedium: "cpc",
+                utmEmail: "Klaviyo",
+                stripeCustomerId: "cus_existing",
+            });
+            const assessment = await createFullAssessment();
+            await createPrice({ default: true });
+            const response = await request(app)
+                .post("/stripe-elements/create-payment")
+                .set("Authorization", `Bearer ${getAccessToken(buyer._id)}`)
+                .send({
+                    assessmentId: String(assessment._id),
+                    utm_source: "Klaviyo",
+                    utm_medium: "email",
+                });
+            expect(response.status).toBe(200);
+            expect(
+                mockStripe.paymentIntents.create.mock.calls[0][0].metadata,
+            ).toMatchObject({
+                utm_source: "google",
+                utm_campaign: "brand",
+                utm_medium: "cpc",
+            });
+        });
+
         it("creates an order and a payment intent for a full assessment", async () => {
             const assessment = await createFullAssessment();
             const price = await createPrice({ default: true });

@@ -1,3 +1,7 @@
+const {
+    UTM_DEFAULT,
+    ensureUtmDefaults,
+} = require("../../common/utils/utmParams");
 const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema(
@@ -171,19 +175,23 @@ const UserSchema = new mongoose.Schema(
         },
         utmSource: {
             type: String,
-            default: "default",
+            default: UTM_DEFAULT,
+            immutable: true,
         },
         utmCampaign: {
             type: String,
-            default: "default",
+            default: UTM_DEFAULT,
+            immutable: true,
         },
         utmMedium: {
             type: String,
-            default: "default",
+            default: UTM_DEFAULT,
+            immutable: true,
         },
         utmEmail: {
             type: String,
         },
+        flowId: { type: String },
         msisdn: {
             type: String,
             unique: true,
@@ -213,6 +221,7 @@ const UserSchema = new mongoose.Schema(
                 delete ret.utmCampaign;
                 delete ret.utmMedium;
                 delete ret.utmEmail;
+                delete ret.flowId;
                 return ret;
             },
         },
@@ -224,10 +233,15 @@ const UserSchema = new mongoose.Schema(
                 delete ret.utmCampaign;
                 delete ret.utmMedium;
                 delete ret.utmEmail;
+                delete ret.flowId;
                 return ret;
             },
         },
     },
 );
+
+UserSchema.pre("validate", function () {
+    ensureUtmDefaults(this);
+});
 
 module.exports = mongoose.model("User", UserSchema);

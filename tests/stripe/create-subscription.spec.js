@@ -465,6 +465,9 @@ describe("POST /stripe/subscription", () => {
                 metadata: {
                     userId: user._id.toString(),
                     source: "subscription_checkout_flow",
+                    utm_source: "organic",
+                    utm_campaign: "organic",
+                    utm_medium: "organic",
                 },
             });
             expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
@@ -480,7 +483,7 @@ describe("POST /stripe/subscription", () => {
             expect(refreshed.stripeCustomerId).toBe("cus_new");
         });
 
-        it("carries real utm values but omits default ones", async () => {
+        it("carries saved attribution and replaces missing values with organic", async () => {
             const plan = await seedPlanWithPrices();
             const lpUser = await createUser({
                 email: "lp-lead@bazzingo.com",
@@ -508,7 +511,8 @@ describe("POST /stripe/subscription", () => {
                     userId: lpUser._id.toString(),
                     source: "subscription_checkout_flow",
                     utm_source: "google",
-                    utm_email: "klaviyo",
+                    utm_campaign: "organic",
+                    utm_medium: "organic",
                 },
             });
         });

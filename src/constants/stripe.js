@@ -2,7 +2,7 @@ const STRIPE_RESPONSE_STATUSES = {
     REQUIRES_ACTION: "requires_action",
 };
 
-const STRIPE_UTM_DEFAULT = "default";
+const STRIPE_UTM_DEFAULT = "organic";
 
 const STRIPE_UTM_METADATA_KEYS = {
     SOURCE: "utm_source",

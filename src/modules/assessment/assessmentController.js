@@ -17,6 +17,7 @@ const DailyChallenge = require("../game/dailyChallengeModel");
 const PriceCatalog = require("../price-catalog/priceCatalogModel");
 const Plan = require("../plan/planModel");
 const Order = require("../stripe/orderModel");
+const { unusedPurchaseIds } = require("../../common/utils/entitlements");
 const Subscription = require("../stripe/subscriptionModel");
 const User = require("../user/userModel");
 const { getAssessmentAgeGroup } = require("./assessmentService");
@@ -1134,9 +1135,11 @@ class AssessmentController {
                 .select("assessmentId")
                 .lean();
 
-            const uniqueAssessmentIds = Array.from(
-                new Set(orders.map((order) => String(order.assessmentId))),
+            const purchasedIds = orders.map((order) =>
+                String(order.assessmentId),
             );
+
+            const uniqueAssessmentIds = Array.from(new Set(purchasedIds));
 
             const submitted = await this.assessmentService.findScores({
                 userId,
@@ -1148,10 +1151,12 @@ class AssessmentController {
                 submitted.map((score) => String(score.assessmentId)),
             );
 
+            const unused = unusedPurchaseIds(purchasedIds, submittedSet);
+
             for (const assessmentId of uniqueAssessmentIds) {
                 assessments.push({
                     assessmentId,
-                    isSubmitted: submittedSet.has(assessmentId),
+                    isSubmitted: !unused.has(assessmentId),
                 });
             }
         } catch (err) {
@@ -1758,6 +1763,13 @@ class AssessmentController {
             ? await this.assessmentService.findPurchasedAssessments(userId)
             : [];
 
+        const completedIds = await this.completedAssessmentIds(userId);
+
+        const unusedPurchases = unusedPurchaseIds(
+            purchasedAssessments.map((assessment) => String(assessment._id)),
+            completedIds,
+        );
+
         const selectedAssessments = [];
 
         for (const category of uniqueCategories) {
@@ -1766,6 +1778,8 @@ class AssessmentController {
                     category,
                     userId,
                     purchasedAssessments,
+                    completedIds,
+                    unusedPurchases,
                 });
 
             if (assessment) {
@@ -1783,22 +1797,18 @@ class AssessmentController {
             }
         }
 
-        const purchasedUnsubmittedAssessments = [];
-
-        for (const assessment of purchasedAssessments) {
-            const existingScore = await this.assessmentService.findScore({
-                userId,
-                type: ASSESSMENT_TYPES.FULL,
-                assessmentId: assessment._id,
-            });
-
-            if (!existingScore) {
-                purchasedUnsubmittedAssessments.push({
-                    ...assessment,
-                    isAssessmentPurchased: true,
-                });
-            }
-        }
+        const purchasedUnsubmittedAssessments = [
+            ...new Map(
+                purchasedAssessments
+                    .filter((assessment) =>
+                        unusedPurchases.has(String(assessment._id)),
+                    )
+                    .map((assessment) => [
+                        String(assessment._id),
+                        { ...assessment, isAssessmentPurchased: true },
+                    ]),
+            ).values(),
+        ];
 
         this.logger.info("Full assessments sent", {
             requestId: req.requestId,
@@ -1859,47 +1869,75 @@ class AssessmentController {
         }
     }
 
-    async selectForCategory({ category, userId, purchasedAssessments }) {
-        if (userId) {
-            const categoryPurchases = purchasedAssessments.filter(
-                (assessment) => assessment.mainCategory === category,
-            );
-
-            for (const assessment of categoryPurchases) {
-                const existingScore = await this.assessmentService.findScore({
-                    userId,
-                    type: ASSESSMENT_TYPES.FULL,
-                    assessmentId: assessment._id,
-                });
-
-                if (!existingScore) {
-                    return { assessment, isAssessmentPurchased: true };
-                }
-            }
-
-            const fromChallenge = await this.assessmentFromTodaysChallenge({
-                category,
-                userId,
-            });
-
-            if (fromChallenge) {
-                return {
-                    assessment: fromChallenge,
-                    isAssessmentPurchased: false,
-                };
-            }
+    async completedAssessmentIds(userId) {
+        if (!userId) {
+            return new Set();
         }
 
+        const scores = await this.assessmentService.findScores({
+            userId,
+            type: ASSESSMENT_TYPES.FULL,
+        });
+
+        return new Set(scores.map((score) => String(score.assessmentId)));
+    }
+
+    async selectForCategory({
+        category,
+        userId,
+        purchasedAssessments,
+        completedIds,
+        unusedPurchases,
+    }) {
         const candidates =
             await this.assessmentService.findActiveByCategory(category);
 
+        if (!userId) {
+            return {
+                assessment: pickRandomItem(candidates),
+                isAssessmentPurchased: false,
+            };
+        }
+
+        const unsubmittedPurchase = purchasedAssessments.find(
+            (assessment) =>
+                assessment.mainCategory === category &&
+                unusedPurchases.has(String(assessment._id)),
+        );
+
+        if (unsubmittedPurchase) {
+            return {
+                assessment: unsubmittedPurchase,
+                isAssessmentPurchased: true,
+            };
+        }
+
+        const fromChallenge = await this.assessmentFromTodaysChallenge({
+            category,
+            completedIds,
+        });
+
+        if (fromChallenge) {
+            return {
+                assessment: fromChallenge,
+                isAssessmentPurchased: false,
+            };
+        }
+
+        // Offer one the user has not taken yet. Repeating is only acceptable
+        // once the category is exhausted, otherwise they get sold a rerun
+        // while unseen assessments are still pending.
+        const unseen = candidates.filter(
+            (assessment) => !completedIds.has(String(assessment._id)),
+        );
+
         return {
-            assessment: pickRandomItem(candidates),
+            assessment: pickRandomItem(unseen.length ? unseen : candidates),
             isAssessmentPurchased: false,
         };
     }
 
-    async assessmentFromTodaysChallenge({ category, userId }) {
+    async assessmentFromTodaysChallenge({ category, completedIds }) {
         const now = new Date();
         const startOfDay = new Date(
             now.getFullYear(),
@@ -1931,13 +1969,7 @@ class AssessmentController {
                 continue;
             }
 
-            const existingScore = await this.assessmentService.findScore({
-                userId,
-                type: ASSESSMENT_TYPES.FULL,
-                assessmentId: fullAssessment._id,
-            });
-
-            if (!existingScore) {
+            if (!completedIds.has(String(fullAssessment._id))) {
                 return fullAssessment;
             }
         }

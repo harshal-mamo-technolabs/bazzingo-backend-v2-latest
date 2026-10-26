@@ -1,3 +1,4 @@
+const captureFlowAttribution = require("../../common/middlewares/captureFlowAttribution");
 const express = require("express");
 const logger = require("../../config/logger");
 const { getStripe } = require("../../config/stripe");
@@ -36,10 +37,10 @@ router.route("/config").get(handler("getConfig"));
 router.route("/default-config").get(handler("getDefaultConfig"));
 router
     .route("/create-subscription")
-    .post(requireAuth, handler("createSubscription"));
+    .post(requireAuth, captureFlowAttribution, handler("createSubscription"));
 router
     .route("/activate-subscription")
-    .post(requireAuth, handler("activateSubscription"));
+    .post(requireAuth, captureFlowAttribution, handler("activateSubscription"));
 router
     .route("/subscription-status/:subscriptionId")
     .get(requireAuth, handler("getSubscriptionStatus"));
@@ -52,14 +53,18 @@ router
 router
     .route("/my-subscriptions")
     .get(requireAuth, handler("getUserSubscriptions"));
-router.route("/create-payment").post(requireAuth, handler("createPayment"));
+router
+    .route("/create-payment")
+    .post(requireAuth, captureFlowAttribution, handler("createPayment"));
 router
     .route("/payment-status/:orderId")
     .get(requireAuth, handler("getPaymentStatus"));
 router.route("/confirm-payment").post(requireAuth, handler("confirmPayment"));
 router.route("/my-orders").get(requireAuth, handler("getUserOrders"));
-router.route("/quick-pay").post(requireAuth, handler("quickPay"));
-router.route("/pay").post(requireAuth, handler("pay"));
+router
+    .route("/quick-pay")
+    .post(requireAuth, captureFlowAttribution, handler("quickPay"));
+router.route("/pay").post(requireAuth, captureFlowAttribution, handler("pay"));
 
 router
     .route("/payment-methods")

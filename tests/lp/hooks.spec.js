@@ -100,9 +100,9 @@ describe("POST /lp/hook/create", () => {
         expect(response.body.message).toBe("Hook created");
         expect(response.body.data.hook).toMatchObject({
             uuid: "hook-1",
-            utmSource: "default",
-            utmCampaign: "default",
-            utmMedium: "default",
+            utmSource: "organic",
+            utmCampaign: "organic",
+            utmMedium: "organic",
             paymentCompleted: false,
             paymentInitiated: false,
             assessmentStatus: "pending",
@@ -213,12 +213,12 @@ describe("POST /lp/hook/create", () => {
             email: "lead@bazzingo.com",
             name: "Lead",
             utmSource: "google",
-            utmCampaign: "default",
-            utmMedium: "default",
+            utmCampaign: "organic",
+            utmMedium: "organic",
         });
     });
 
-    it("should backfill the real utm values onto a matching user", async () => {
+    it("should preserve the original organic attribution on a matching user", async () => {
         const user = await createUser({ email: "lead@bazzingo.com" });
 
         await create({
@@ -228,8 +228,8 @@ describe("POST /lp/hook/create", () => {
         });
 
         const updated = await User.findById(user._id);
-        expect(updated.utmSource).toBe("google");
-        expect(updated.utmCampaign).toBe("default");
+        expect(updated.utmSource).toBe("organic");
+        expect(updated.utmCampaign).toBe("organic");
     });
 
     it("should never overwrite a real utm value already on the user", async () => {
@@ -246,6 +246,10 @@ describe("POST /lp/hook/create", () => {
 
         const updated = await User.findById(user._id);
         expect(updated.utmSource).toBe("meta");
+        expect(profileProperties().source).toBe("meta");
+        expect(
+            helpscoutService.scheduleSyncContactUtmToHelpScout,
+        ).toHaveBeenCalledWith(expect.objectContaining({ utmSource: "meta" }));
     });
 
     it("should not backfill when the hook only carries default utm values", async () => {
@@ -254,7 +258,7 @@ describe("POST /lp/hook/create", () => {
         await create({ uuid: "hook-1", email: "lead@bazzingo.com" });
 
         const updated = await User.findById(user._id);
-        expect(updated.utmSource).toBe("default");
+        expect(updated.utmSource).toBe("organic");
     });
 });
 
@@ -304,14 +308,14 @@ describe("PATCH /lp/hook/update/:uuid", () => {
         expect(hook).toBeTruthy();
     });
 
-    it("should apply the utm values sent with the update", async () => {
+    it("should ignore utm changes after the hook is created", async () => {
         await seedHook({ email: "lead@bazzingo.com" });
 
         await update("hook-1", { utm_source: "google" });
 
         const hook = await LandingPageHook.findOne({ uuid: "hook-1" });
-        expect(hook.utmSource).toBe("google");
-        expect(hook.utmMedium).toBe("default");
+        expect(hook.utmSource).toBe("organic");
+        expect(hook.utmMedium).toBe("organic");
     });
 
     it("should fire the payment initiated event on the transition", async () => {
@@ -339,7 +343,9 @@ describe("PATCH /lp/hook/update/:uuid", () => {
         klaviyoService.createEvent.mockClear();
         await update("hook-1", { paymentCompleted: true });
 
-        expect(firstRun).toContain(KLAVIYO_EVENTS.LANDING_PAGE_PAYMENT_COMPLETED);
+        expect(firstRun).toContain(
+            KLAVIYO_EVENTS.LANDING_PAGE_PAYMENT_COMPLETED,
+        );
         expect(firstRun).toContain(
             KLAVIYO_EVENTS.LANDING_PAGE_ASSESSMENT_COMPLETED,
         );
@@ -505,6 +511,37 @@ describe("GET /lp/hook/resume/:uuid", () => {
             assessmentId: String(assessmentId),
             answers: [{ questionId: "q1", chosenIndex: 2 }],
         });
+    });
+
+    it("captures the flow ID from a resumed email link while keeping original UTMs", async () => {
+        const user = await createUser({
+            email: "lead@bazzingo.com",
+            utmSource: "google",
+            utmCampaign: "brand",
+            utmMedium: "cpc",
+        });
+        await seedHook({ email: user.email });
+        const response = await resume(
+            "hook-1",
+            "?utm_id=XHLfvC&utm_medium=klaviyo_email",
+        );
+        expect(response.status).toBe(200);
+        expect(
+            await LandingPageHook.findOne({ uuid: "hook-1" }).lean(),
+        ).toMatchObject({ flowId: "XHLfvC" });
+        expect(await User.collection.findOne({ _id: user._id })).toMatchObject({
+            flowId: "XHLfvC",
+            utmSource: "google",
+            utmCampaign: "brand",
+            utmMedium: "cpc",
+        });
+        expect(profileProperties()).toMatchObject({
+            flow_id: "XHLfvC",
+            source: "google",
+            medium: "cpc",
+        });
+        await resume("hook-1");
+        expect((await User.findById(user._id)).flowId).toBe("XHLfvC");
     });
 
     it("should persist the utm email and fire the resume event", async () => {

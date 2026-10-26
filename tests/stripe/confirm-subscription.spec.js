@@ -189,7 +189,7 @@ describe("POST /stripe/subscription/confirm", () => {
             mockStripe.paymentIntents.retrieve.mockResolvedValue({
                 id: "pi_1",
                 status: "succeeded",
-                metadata: {},
+                metadata: { flow_id: "ORIGINAL_FLOW", utm_email: "Klaviyo" },
             });
 
             const response = await confirm({
@@ -219,6 +219,10 @@ describe("POST /stripe/subscription/confirm", () => {
                     items: [{ price: "price_monthly", quantity: 1 }],
                     default_payment_method: "pm_saved",
                     proration_behavior: "none",
+                    metadata: expect.objectContaining({
+                        flow_id: "ORIGINAL_FLOW",
+                        utm_email: "Klaviyo",
+                    }),
                 }),
             );
         });

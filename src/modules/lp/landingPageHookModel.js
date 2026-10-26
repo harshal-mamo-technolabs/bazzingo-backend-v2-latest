@@ -1,3 +1,7 @@
+const {
+    UTM_DEFAULT,
+    ensureUtmDefaults,
+} = require("../../common/utils/utmParams");
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
@@ -21,13 +25,18 @@ const LandingPageHookSchema = new Schema(
             ref: "QuickMiniAssessment",
         },
         landingPageName: { type: String },
-        utmSource: { type: String, default: "default" },
-        utmCampaign: { type: String, default: "default" },
-        utmMedium: { type: String, default: "default" },
+        utmSource: { type: String, default: UTM_DEFAULT, immutable: true },
+        utmCampaign: { type: String, default: UTM_DEFAULT, immutable: true },
+        utmMedium: { type: String, default: UTM_DEFAULT, immutable: true },
         utmEmail: { type: String },
+        flowId: { type: String },
         answers: [{ _id: false, questionId: String, chosenIndex: Number }],
     },
     { timestamps: true },
 );
+
+LandingPageHookSchema.pre("validate", function () {
+    ensureUtmDefaults(this);
+});
 
 module.exports = mongoose.model("LandingPageHook", LandingPageHookSchema);

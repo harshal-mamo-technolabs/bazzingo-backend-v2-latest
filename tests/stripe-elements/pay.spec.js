@@ -102,6 +102,49 @@ describe("POST /stripe-elements/pay", () => {
         );
     });
 
+    it("does not carry old email attribution into organic one-click purchases", async () => {
+        await User.findByIdAndUpdate(user._id, {
+            defaultPaymentMethodId: "pm_1",
+            flowId: "OLD_FLOW",
+            utmEmail: "Klaviyo",
+        });
+        mockStripe.paymentIntents.create.mockResolvedValue({
+            id: "pi_regression",
+            status: "succeeded",
+        });
+        for (const attribution of [
+            {},
+            { flow_id: "CURRENT_FLOW", utm_email: "Klaviyo" },
+            {},
+        ]) {
+            const response = await request(app)
+                .post("/stripe-elements/pay")
+                .set("Authorization", `Bearer ${token}`)
+                .send({
+                    amount: 1500,
+                    productName: "Assessment",
+                    itemType: "assessment",
+                    itemId: "assessment-1",
+                    ...attribution,
+                });
+            expect(response.status).toBe(200);
+            const metadata =
+                mockStripe.paymentIntents.create.mock.calls.at(-1)[0].metadata;
+            expect(metadata).toMatchObject({
+                utm_source: "organic",
+                utm_campaign: "organic",
+                utm_medium: "organic",
+            });
+            if (attribution.flow_id) {
+                expect(metadata).toMatchObject(attribution);
+            } else {
+                expect(metadata).not.toHaveProperty("flow_id");
+                expect(metadata).not.toHaveProperty("utm_email");
+            }
+        }
+        expect((await User.findById(user._id)).flowId).toBe("OLD_FLOW");
+    });
+
     it("charges the saved card in one click", async () => {
         await User.findByIdAndUpdate(user._id, {
             defaultPaymentMethodId: "pm_1",

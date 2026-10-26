@@ -27,7 +27,7 @@ const HELPSCOUT_DEFAULTS = {
     UTM_SOURCE_SLUG: "utm_source",
     UTM_CAMPAIGN_SLUG: "utm_campaign",
     UTM_MEDIUM_SLUG: "utm_medium",
-    UTM_VALUE: "default",
+    UTM_VALUE: "organic",
     FIRST_NAME: "User",
     SIGNATURE_EXPIRES_IN_SECONDS: 3600,
     TOKEN_EXPIRES_IN_SECONDS: 172800,

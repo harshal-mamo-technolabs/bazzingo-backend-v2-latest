@@ -392,6 +392,12 @@ class StripeElementsController {
                 );
             }
 
+            // Activation resumes this checkout, not the user's past email history.
+            user.$locals.purchaseAttribution = {
+                flowId: setupIntent.metadata?.flow_id,
+                utmEmail: setupIntent.metadata?.utm_email,
+            };
+
             const finalRecurringPriceId =
                 recurringPriceId || setupIntent.metadata?.recurringPriceId;
             const finalWithTrial =
@@ -2169,7 +2175,12 @@ class StripeElementsController {
                 },
             });
         } catch (error) {
-            next(httpErrorFrom(error, STRIPE_ELEMENTS_MESSAGES.SETUP_INTENT_FAILED));
+            next(
+                httpErrorFrom(
+                    error,
+                    STRIPE_ELEMENTS_MESSAGES.SETUP_INTENT_FAILED,
+                ),
+            );
         }
     }
 
@@ -2242,7 +2253,9 @@ class StripeElementsController {
                 data: { paymentMethodId, paymentMethods },
             });
         } catch (error) {
-            next(httpErrorFrom(error, STRIPE_ELEMENTS_MESSAGES.CARD_SAVE_FAILED));
+            next(
+                httpErrorFrom(error, STRIPE_ELEMENTS_MESSAGES.CARD_SAVE_FAILED),
+            );
         }
     }
 

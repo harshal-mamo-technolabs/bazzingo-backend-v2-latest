@@ -137,7 +137,7 @@ const STRIPE_ELEMENTS_DEFAULTS = {
     FULL_ASSESSMENT_NAME: "Full Assessment",
     ADHD_ASSESSMENT_NAME: "ADHD Assessment",
     EI_ASSESSMENT_NAME: "Emotional Intelligence Assessment",
-    UTM_VALUE: "default",
+    UTM_VALUE: "organic",
     MINIMUM_AMOUNT: 50,
     METADATA_VALUE_MAX: 500,
     SUBSCRIPTION_ID_PREFIX: "sub_",

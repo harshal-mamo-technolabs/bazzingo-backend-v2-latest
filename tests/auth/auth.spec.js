@@ -19,6 +19,7 @@ const {
 const Leaderboard = require("../../src/modules/leaderboard/leaderboardModel");
 const Subscription = require("../../src/modules/stripe/subscriptionModel");
 const User = require("../../src/modules/user/userModel");
+const LandingPageHook = require("../../src/modules/lp/landingPageHookModel");
 const Badge = require("../../src/modules/badge/badgeModel");
 const { badges } = require("../../src/modules/badge/badgeData");
 const { useInMemoryDatabase } = require("../utils/db");
@@ -472,7 +473,80 @@ describe("POST /auth/signup-lp", () => {
         const user = await User.findOne({ email: validBody.email }).select(
             "+utmSource +utmCampaign +utmMedium",
         );
-        expect(user.utmSource).toBe("default");
+        expect(user.utmSource).toBe("organic");
+    });
+
+    it.each(["organic", "google"])(
+        "should preserve saved attribution on repeat signup (%s)",
+        async (source) => {
+            const user = await createUser({
+                email: validBody.email,
+                utmSource: source,
+                utmCampaign: "original",
+                utmMedium: "cpc",
+            });
+            const response = await signupLp({
+                ...validBody,
+                utm_source: "Klaviyo",
+                utm_campaign: "reminder",
+                utm_medium: "email",
+            });
+            expect(response.status).toBe(201);
+            expect(
+                await User.collection.findOne({ _id: user._id }),
+            ).toMatchObject({
+                utmSource: source,
+                utmCampaign: "original",
+                utmMedium: "cpc",
+            });
+            expect(
+                helpscoutService.scheduleSyncUserUtmToHelpScout,
+            ).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    utmSource: source,
+                    utmCampaign: "original",
+                    utmMedium: "cpc",
+                }),
+            );
+        },
+    );
+
+    it("should use the first saved hook attribution when later signup sends different UTMs", async () => {
+        await LandingPageHook.create({
+            uuid: "first-visit",
+            email: validBody.email,
+            utmSource: "google",
+            utmCampaign: "brand",
+            utmMedium: "cpc",
+        });
+        const response = await signupLp({
+            ...validBody,
+            uuid: "first-visit",
+            utm_source: "Klaviyo",
+            utm_campaign: "reminder",
+            utm_medium: "email",
+        });
+        expect(response.status).toBe(201);
+        expect(
+            await User.collection.findOne({ email: validBody.email }),
+        ).toMatchObject({
+            utmSource: "google",
+            utmCampaign: "brand",
+            utmMedium: "cpc",
+        });
+    });
+
+    it("carries a hook's flow ID into the user created at signup", async () => {
+        await LandingPageHook.create({
+            uuid: "flow-visit",
+            email: validBody.email,
+            flowId: "XHLfvC",
+        });
+        const response = await signupLp({ ...validBody, uuid: "flow-visit" });
+        expect(response.status).toBe(201);
+        expect((await User.findOne({ email: validBody.email })).flowId).toBe(
+            "XHLfvC",
+        );
     });
 
     it("should take a real utm value from the body", async () => {
@@ -746,9 +820,9 @@ describe("password reset", () => {
 
         expect(response.statusCode).toBe(200);
         const updated = await User.findById(user._id);
-        expect(
-            await bcrypt.compare("new-password", updated.password),
-        ).toBe(true);
+        expect(await bcrypt.compare("new-password", updated.password)).toBe(
+            true,
+        );
         expect(updated.passwordResetToken).toBeNull();
 
         const reuse = await request(app)

@@ -1,11 +1,10 @@
         const jwt = require("jsonwebtoken");
         const createHttpError = require("http-errors");
         const { config } = require("../../config");
-        const { realUtmValue } = require("../../common/utils/utmParams");
+        const { persistUtmDefaults, buildUtmMetadata, buildPurchaseAttributionMetadata } = require("../../common/utils/utmParams");
         const {
             RESPONSE_STATUS,
             ORDER_STATUSES,
-            STRIPE_UTM_METADATA_KEYS,
             STRIPE_PRICE_TYPES,
             STRIPE_PRODUCT_DURATIONS,
             STRIPE_PLAN_PRODUCT_DURATIONS,
@@ -54,18 +53,10 @@
         const Order = require("./orderModel");
         const Subscription = require("./subscriptionModel");
 
-        // Omitted entirely (no "default" placeholder) when there's no real value —
-        // a non-landing-page purchase has nothing real to report, and stamping
-        // "default" on every purchase's metadata is just noise.
-        const utmMetadataEntry = (key, value) =>
-            realUtmValue(value) ? { [key]: String(value) } : {};
-
         const mergeUtmMetadata = (metadata = {}, user) => ({
-            ...utmMetadataEntry(STRIPE_UTM_METADATA_KEYS.SOURCE, user?.utmSource),
-            ...utmMetadataEntry(STRIPE_UTM_METADATA_KEYS.CAMPAIGN, user?.utmCampaign),
-            ...utmMetadataEntry(STRIPE_UTM_METADATA_KEYS.MEDIUM, user?.utmMedium),
-            ...utmMetadataEntry(STRIPE_UTM_METADATA_KEYS.EMAIL, user?.utmEmail),
             ...metadata,
+            ...buildUtmMetadata(user),
+            ...buildPurchaseAttributionMetadata(user),
         });
 
         const isStripePriceId = (value) =>
@@ -532,6 +523,7 @@
             }
 
             async ensureStripeCustomer(user, source) {
+                await persistUtmDefaults(user);
                 if (user.stripeCustomerId) {
                     return user.stripeCustomerId;
                 }
@@ -539,10 +531,7 @@
                 const customer = await this.stripe.customers.create({
                     email: user.email,
                     name: user.name || undefined,
-                    metadata: mergeUtmMetadata(
-                        { userId: user._id.toString(), source },
-                        user,
-                    ),
+                    metadata: { userId: user._id.toString(), source, ...buildUtmMetadata(user) },
                 });
 
                 user.stripeCustomerId = customer.id;
@@ -819,6 +808,7 @@
             }
 
             async createSubscription({ user, planId, type, successUrl, cancelUrl }) {
+                if (user) await persistUtmDefaults(user);
                 this.logger.info("Creating a subscription", {
                     userId: String(user?._id),
                     planId,
@@ -1166,6 +1156,7 @@
             }
 
             async confirmSubscription({ user, paymentIntentId, planId, type }) {
+                await persistUtmDefaults(user);
                 this.logger.info("Confirming a subscription after authentication", {
                     userId: String(user._id),
                     planId,
@@ -1197,6 +1188,10 @@
                     }
 
                     const metadata = paymentIntent.metadata || {};
+                    user.$locals.purchaseAttribution = {
+                        flowId: metadata.flow_id,
+                        utmEmail: metadata.utm_email,
+                    };
                     const recurringCadence = metadata.recurringCadence || type;
                     const trialRequested = metadata.trialRequested === "true";
                     const trialHonored = metadata.trialHonored === "true";

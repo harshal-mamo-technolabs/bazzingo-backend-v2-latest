@@ -1,6 +1,10 @@
 const crypto = require("crypto");
 const { config } = require("../../config");
-const { realUtmValue } = require("../../common/utils/utmParams");
+const {
+    realUtmValue,
+    parseUtmParams,
+    persistUtmDefaults,
+} = require("../../common/utils/utmParams");
 const {
     KLAVIYO_EVENTS,
     KLAVIYO_MESSAGES,
@@ -44,9 +48,7 @@ const trimmedOrUndefined = (value) =>
         ? String(value).trim()
         : undefined;
 
-// utmEmail (only ever set by the Klaviyo reminder-link resume flow)
-// overrides the original first-touch utmMedium — no separate "utm_email"
-// property is reported.
+// Keep the original acquisition medium separate from email attribution.
 const buildKlaviyoUtmProperties = (record) => {
     if (!record) {
         return {};
@@ -55,9 +57,9 @@ const buildKlaviyoUtmProperties = (record) => {
     const out = {};
     const source = trimmedOrUndefined(record.utmSource);
     const campaign = trimmedOrUndefined(record.utmCampaign);
-    const medium =
-        trimmedOrUndefined(record.utmEmail) ??
-        trimmedOrUndefined(record.utmMedium);
+    const medium = trimmedOrUndefined(record.utmMedium);
+    const email = trimmedOrUndefined(record.utmEmail);
+    const flowId = trimmedOrUndefined(record.flowId);
 
     if (source !== undefined) {
         out[LP_KLAVIYO_PROPERTIES.SOURCE] = source;
@@ -70,6 +72,11 @@ const buildKlaviyoUtmProperties = (record) => {
     if (medium !== undefined) {
         out[LP_KLAVIYO_PROPERTIES.MEDIUM] = medium;
     }
+
+    if (email !== undefined) {
+        out.utm_email = email;
+    }
+    if (flowId !== undefined) out.flow_id = flowId;
 
     return out;
 };
@@ -332,7 +339,8 @@ class KlaviyoSyncService {
             Boolean(hookObj.paymentInitiated)
         ) {
             events.push({
-                metricName: KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_INITIATED,
+                metricName:
+                    KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_INITIATED,
                 uniqueId: `${hookObj.uuid}:${LP_KLAVIYO_EVENT_IDS.EMAIL_FLOW_PAYMENT_INITIATED}`,
                 properties: {
                     [LP_KLAVIYO_PROPERTIES.LANDING_PAGE_NAME]:
@@ -351,7 +359,8 @@ class KlaviyoSyncService {
             Boolean(hookObj.paymentCompleted)
         ) {
             events.push({
-                metricName: KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_COMPLETED,
+                metricName:
+                    KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_COMPLETED,
                 uniqueId: `${hookObj.uuid}:${LP_KLAVIYO_EVENT_IDS.EMAIL_FLOW_PAYMENT_COMPLETED}`,
                 properties: {
                     [LP_KLAVIYO_PROPERTIES.LANDING_PAGE_NAME]:
@@ -443,9 +452,16 @@ class KlaviyoSyncService {
             properties[LP_KLAVIYO_PROPERTIES.MAIN_CATEGORY] = mainCategory;
         }
 
-        const user = await User.findOne({ email })
-            .select(LP_SELECT.KLAVIYO_USER)
-            .lean();
+        const user = await User.findOne({ email }).select(
+            LP_SELECT.KLAVIYO_USER,
+        );
+
+        if (user) await persistUtmDefaults(user);
+        Object.assign(
+            properties,
+            buildKlaviyoUtmProperties(parseUtmParams(user || hookObj)),
+        );
+        if (user?.flowId) properties.flow_id = user.flowId;
 
         Object.assign(
             properties,
@@ -500,6 +516,9 @@ class KlaviyoSyncService {
                     properties: {
                         ...buildKlaviyoUtmProperties(hookObj),
                         ...event.properties,
+                        ...buildKlaviyoUtmProperties(
+                            parseUtmParams(user || hookObj),
+                        ),
                     },
                     uniqueId: event.uniqueId,
                     timeISO: updatedAtISO,
@@ -611,11 +630,11 @@ class KlaviyoSyncService {
         const nextBillingDateISO =
             isTrialing && trialEndISO
                 ? trialEndISO
-                : (invoiceLine?.end
-                      ? fromStripeSecondsToISO(invoiceLine.end)
-                      : (toISOStringOrUndefined(
-                            subscriptionRecord?.nextBillingDate,
-                        ) ?? planEndISO));
+                : invoiceLine?.end
+                  ? fromStripeSecondsToISO(invoiceLine.end)
+                  : (toISOStringOrUndefined(
+                        subscriptionRecord?.nextBillingDate,
+                    ) ?? planEndISO);
         const planEndFromInvoiceISO =
             isTrialing && trialEndISO
                 ? trialEndISO

@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { ASSESSMENT_TYPES } = require("../../constants");
+const { unusedPurchaseIds } = require("../utils/entitlements");
 
 const pickRandomItem = (items) =>
     !items || items.length === 0
@@ -125,8 +126,13 @@ class CategoryAssessmentService {
                 : empty;
         }
 
-        const orderAssessmentIds =
-            await this.orderService.findPurchasedAssessmentIds(userId);
+        // One entry per succeeded order, so a repeat purchase still counts.
+        const orders =
+            await this.orderService.findSucceededAssessmentOrders(userId);
+
+        const orderAssessmentIds = orders
+            .map((order) => order.assessmentId)
+            .filter(Boolean);
 
         const purchased = orderAssessmentIds.length
             ? await this.assessmentModel
@@ -149,10 +155,17 @@ class CategoryAssessmentService {
                 .filter(Boolean),
         );
 
+        const unusedPurchases = unusedPurchaseIds(
+            orderAssessmentIds
+                .map(String)
+                .filter((id) => purchasedIdSet.has(id)),
+            completedIdSet,
+        );
+
         const unsubmittedPurchased = purchased.filter(
             (assessment) =>
                 assessment.active !== false &&
-                !completedIdSet.has(String(assessment._id)),
+                unusedPurchases.has(String(assessment._id)),
         );
 
         if (unsubmittedPurchased.length > 0) {

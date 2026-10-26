@@ -1,3 +1,4 @@
+const { buildUtmMetadata } = require("../../common/utils/utmParams");
 const crypto = require("crypto");
 const { config } = require("../../config");
 const {
@@ -30,23 +31,19 @@ class HelpscoutService {
     }
 
     buildUtmPropertyEntries(user) {
-        // utmEmail (only ever set by the Klaviyo reminder-link resume flow)
-        // overrides the original first-touch utmMedium.
+        const utms = buildUtmMetadata(user);
         return [
             {
                 slug: config.HELP_SCOUT_UTM_SOURCE_SLUG,
-                value: user.utmSource || HELPSCOUT_DEFAULTS.UTM_VALUE,
+                value: utms.utm_source,
             },
             {
                 slug: config.HELP_SCOUT_UTM_CAMPAIGN_SLUG,
-                value: user.utmCampaign || HELPSCOUT_DEFAULTS.UTM_VALUE,
+                value: utms.utm_campaign,
             },
             {
                 slug: config.HELP_SCOUT_UTM_MEDIUM_SLUG,
-                value:
-                    user.utmEmail ||
-                    user.utmMedium ||
-                    HELPSCOUT_DEFAULTS.UTM_VALUE,
+                value: utms.utm_medium,
             },
         ].filter(
             (entry) => entry.value != null && String(entry.value).trim() !== "",
@@ -400,8 +397,6 @@ class HelpscoutService {
             name: name || email,
             utmSource: utmSource || HELPSCOUT_DEFAULTS.UTM_VALUE,
             utmCampaign: utmCampaign || HELPSCOUT_DEFAULTS.UTM_VALUE,
-            // utmEmail (email-flow attribution) overrides utmMedium — see
-            // buildUtmPropertyEntries.
             utmMedium: utmMedium || HELPSCOUT_DEFAULTS.UTM_VALUE,
             utmEmail,
         });

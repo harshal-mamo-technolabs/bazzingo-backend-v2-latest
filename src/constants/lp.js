@@ -56,6 +56,7 @@ const LP_USER_UTM_FIELDS = [
     "utmCampaign",
     "utmMedium",
     "utmEmail",
+    "flowId",
 ];
 
 const LP_LEADERBOARD_RANK_FIELDS = [
@@ -96,7 +97,7 @@ const LP_SELECT = {
     MAIN_CATEGORY_TITLE: "mainCategory title",
     FULL_ASSESSMENT_REF: "fullAssessment",
     AGE: "age",
-    KLAVIYO_USER: "_id name age country utmSource utmCampaign utmMedium",
+    KLAVIYO_USER: "_id name age country utmSource utmCampaign utmMedium flowId",
     KLAVIYO_SUBSCRIPTION_USER: "name",
     KLAVIYO_PURCHASE_USER: "_id email name",
     ID: "_id",

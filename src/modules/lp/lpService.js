@@ -6,7 +6,12 @@ const {
 const { getAssessmentAgeGroup } = require("../assessment/assessmentService");
 const AssessmentScore = require("../assessment/assessmentScoreModel");
 const User = require("../user/userModel");
-const { hasRealUtm, realUtmValue } = require("../../common/utils/utmParams");
+const {
+    hasRealUtm,
+    realUtmValue,
+    parseUtmParams,
+    persistUtmDefaults,
+} = require("../../common/utils/utmParams");
 const LandingPageHook = require("./landingPageHookModel");
 
 class LpService {
@@ -17,7 +22,9 @@ class LpService {
     async findHookByUuid(uuid) {
         this.logger.info("Reading a landing page hook", { uuid });
 
-        return await LandingPageHook.findOne({ uuid });
+        const hook = await LandingPageHook.findOne({ uuid });
+        if (hook) await persistUtmDefaults(hook);
+        return hook;
     }
 
     async createHook(fields) {
@@ -25,12 +32,19 @@ class LpService {
             uuid: fields.uuid,
         });
 
-        return await LandingPageHook.create(fields);
+        const user = fields.email
+            ? await this.findUserByEmail(fields.email)
+            : null;
+        return await LandingPageHook.create({
+            ...fields,
+            ...(user ? parseUtmParams(user) : {}),
+        });
     }
 
     async saveHook(hook) {
         this.logger.info("Saving a landing page hook", { uuid: hook.uuid });
 
+        await persistUtmDefaults(hook);
         return await hook.save();
     }
 
@@ -39,7 +53,9 @@ class LpService {
     }
 
     async findUserByEmail(email) {
-        return await User.findOne({ email: String(email).toLowerCase() });
+        const user = await User.findOne({ email: String(email).toLowerCase() });
+        if (user) await persistUtmDefaults(user);
+        return user;
     }
 
     async markAssessmentSubmitted(user) {
@@ -61,7 +77,9 @@ class LpService {
             if (
                 !hook ||
                 !hook.email ||
-                (!hasRealUtm(hook) && realUtmValue(hook.utmEmail) === null)
+                (!hasRealUtm(hook) &&
+                    realUtmValue(hook.utmEmail) === null &&
+                    !hook.flowId)
             ) {
                 return;
             }
@@ -77,7 +95,11 @@ class LpService {
             for (const field of LP_USER_UTM_FIELDS) {
                 const real = realUtmValue(hook[field]);
 
-                if (real !== null && realUtmValue(user[field]) === null) {
+                if (
+                    real !== null &&
+                    (realUtmValue(user[field]) === null ||
+                        (field === "flowId" && user.flowId !== real))
+                ) {
                     user[field] = real;
                     changed = true;
                 }

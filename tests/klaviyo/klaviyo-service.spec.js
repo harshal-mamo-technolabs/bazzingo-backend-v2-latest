@@ -186,7 +186,10 @@ describe("KlaviyoService", () => {
                         email: "player@bazzingo.com",
                         first_name: "Harshal",
                         last_name: "Kumar Patel",
-                        properties: { plan: "pro", bazzingo: true },
+                        properties: {
+                            "bazzingo:plan": "pro",
+                            "bazzingo:bazzingo": true,
+                        },
                     },
                 },
             });
@@ -197,10 +200,59 @@ describe("KlaviyoService", () => {
 
             expect(backup.firstName).toBe("Harshal");
             expect(backup.lastName).toBe("Kumar Patel");
-            expect(backup.properties).toEqual({ plan: "pro", bazzingo: true });
+            expect(backup.properties).toEqual({
+                "bazzingo:plan": "pro",
+                "bazzingo:bazzingo": true,
+            });
         });
 
-        it("merges new properties into the existing backup", async () => {
+        it("namespaces profile keys and converts spaces and camel case to underscores", async () => {
+            httpClient.mockResolvedValue(makeResponse({}));
+
+            await service.upsertProfileByEmail({
+                email: "player@bazzingo.com",
+                properties: {
+                    resume_url: "https://lp.example.com/#/resume?uuid=123",
+                    "Current Plan name": "Standard",
+                    assessmentId: "assessment-1",
+                    "BAZZINGO:RESET_PASSWORD": "https://app.example.com/reset",
+                    "bazzingo:already_named": false,
+                    "total purchased Emotional Intelligence": 0,
+                    source: "google",
+                    campaign: "brand",
+                    medium: "cpc",
+                    utm_email: "Klaviyo",
+                    flowId: "XHLfvC",
+                    ignored: undefined,
+                },
+            });
+
+            const payload = JSON.parse(httpClient.mock.calls[0][1].body);
+            const expected = {
+                "bazzingo:resume_url":
+                    "https://lp.example.com/#/resume?uuid=123",
+                "bazzingo:current_plan_name": "Standard",
+                "bazzingo:assessment_id": "assessment-1",
+                "bazzingo:reset_password": "https://app.example.com/reset",
+                "bazzingo:already_named": false,
+                "bazzingo:total_purchased_emotional_intelligence": 0,
+                "bazzingo:utm_source": "google",
+                "bazzingo:utm_campaign": "brand",
+                "bazzingo:utm_medium": "cpc",
+                "bazzingo:utm_email": "Klaviyo",
+                "bazzingo:flow_id": "XHLfvC",
+                "bazzingo:bazzingo": true,
+            };
+
+            expect(payload.data.attributes.properties).toEqual(expected);
+            expect(payload.data.attributes.email).toBe("player@bazzingo.com");
+            const backup = await KlaviyoBackup.findOne({
+                email: "player@bazzingo.com",
+            }).lean();
+            expect(backup.properties).toEqual(expected);
+        });
+
+        it("merges namespaced properties without deleting legacy backup fields", async () => {
             httpClient.mockResolvedValue(makeResponse({}));
             await KlaviyoBackup.create({
                 email: "player@bazzingo.com",
@@ -217,9 +269,10 @@ describe("KlaviyoService", () => {
             }).lean();
 
             expect(backup.properties).toEqual({
-                plan: "pro",
+                plan: "free",
                 country: "India",
-                bazzingo: true,
+                "bazzingo:plan": "pro",
+                "bazzingo:bazzingo": true,
             });
         });
 

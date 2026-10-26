@@ -1,6 +1,10 @@
 const createHttpError = require("http-errors");
 const { config } = require("../../config");
-const { realUtmValue } = require("../../common/utils/utmParams");
+const {
+    persistUtmDefaults,
+    buildUtmMetadata,
+    buildPurchaseAttributionMetadata,
+} = require("../../common/utils/utmParams");
 const {
     STRIPE_ELEMENTS_MESSAGES,
     STRIPE_ELEMENTS_DYNAMIC_MESSAGES,
@@ -81,25 +85,11 @@ class StripeElementsService {
         };
     }
 
-    // Omitted entirely (no "default" placeholder) when there's no real
-    // value — a non-landing-page purchase has nothing real to report, and
-    // stamping "default" on every purchase's metadata is just noise.
-    utmMetadataEntry(key, value) {
-        return realUtmValue(value) ? { [key]: String(value) } : {};
-    }
-
     withUtmMetadata(metadata, user) {
-        // utmEmail (only ever set by the Klaviyo reminder-link resume flow)
-        // overrides the original first-touch utmMedium — no separate
-        // "utm_email" metadata field.
         return {
-            ...this.utmMetadataEntry("utm_source", user?.utmSource),
-            ...this.utmMetadataEntry("utm_campaign", user?.utmCampaign),
-            ...this.utmMetadataEntry(
-                "utm_medium",
-                user?.utmEmail || user?.utmMedium,
-            ),
             ...metadata,
+            ...buildUtmMetadata(user),
+            ...buildPurchaseAttributionMetadata(user),
         };
     }
 
@@ -107,10 +97,11 @@ class StripeElementsService {
         return {
             email: user.email,
             name: user.name || undefined,
-            metadata: this.withUtmMetadata(
-                { userId: user._id.toString(), ...metadata },
-                user,
-            ),
+            metadata: {
+                userId: user._id.toString(),
+                ...metadata,
+                ...buildUtmMetadata(user),
+            },
         };
     }
 
@@ -121,6 +112,7 @@ class StripeElementsService {
     }
 
     async ensureSubscriptionCustomer(user) {
+        await persistUtmDefaults(user);
         this.logger.info("Resolving the stripe customer of a user", {
             userId: String(user._id),
             stripeCustomerId: user.stripeCustomerId || null,
@@ -310,7 +302,9 @@ class StripeElementsService {
     async syncPaymentMethodToOngoingSubscriptions(user, paymentMethodId) {
         const ongoingSubscriptions = await Subscription.find({
             userId: user._id,
-            status: { $in: [...STRIPE_ACTIVE_SUBSCRIPTION_STATUSES, "past_due"] },
+            status: {
+                $in: [...STRIPE_ACTIVE_SUBSCRIPTION_STATUSES, "past_due"],
+            },
         }).lean();
 
         for (const subscription of ongoingSubscriptions) {
@@ -895,6 +889,7 @@ class StripeElementsService {
     }
 
     async getOrCreatePaymentCustomer(user) {
+        await persistUtmDefaults(user);
         if (user.stripeCustomerId) {
             return user.stripeCustomerId;
         }

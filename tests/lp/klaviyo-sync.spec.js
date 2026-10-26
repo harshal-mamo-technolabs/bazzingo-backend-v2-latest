@@ -206,6 +206,29 @@ describe("syncLandingPageHook", () => {
         });
     });
 
+    it("should keep email attribution separate from the original UTM medium", async () => {
+        const hook = await seedHook({
+            email: "lead@bazzingo.com",
+            utmSource: "google",
+            utmCampaign: "brand",
+            utmMedium: "cpc",
+            utmEmail: "Klaviyo",
+        });
+
+        await buildService().syncLandingPageHook({
+            hook,
+            previousHook: null,
+            source: "hook.create",
+        });
+
+        expect(properties()).toMatchObject({
+            source: "google",
+            campaign: "brand",
+            medium: "cpc",
+            utm_email: "Klaviyo",
+        });
+    });
+
     it("should omit the resume url when the landing page url is not configured", async () => {
         config.LANDING_PAGE_URL = "";
         const hook = await seedHook({ email: "lead@bazzingo.com" });
@@ -259,7 +282,7 @@ describe("syncLandingPageHook", () => {
         });
     });
 
-    it("should fill the utm gaps from the user record without overriding the hook", async () => {
+    it("should prefer the user's fixed attribution over a later hook", async () => {
         await createUser({
             email: "lead@bazzingo.com",
             utmSource: "meta",
@@ -277,7 +300,7 @@ describe("syncLandingPageHook", () => {
             source: "hook.create",
         });
 
-        expect(properties().source).toBe("google");
+        expect(properties().source).toBe("meta");
         expect(properties().campaign).toBe("retarget");
     });
 
@@ -347,12 +370,10 @@ describe("syncLandingPageHook", () => {
         });
 
         expect(
-            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_PAYMENT_INITIATED)
-                .uniqueId,
+            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_PAYMENT_INITIATED).uniqueId,
         ).toBe("hook-1:LandingPagePaymentInitiated");
         expect(
-            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_PAYMENT_COMPLETED)
-                .uniqueId,
+            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_PAYMENT_COMPLETED).uniqueId,
         ).toBe("hook-1:LandingPagePaymentCompleted");
         const assessmentEvent = eventByName(
             KLAVIYO_EVENTS.LANDING_PAGE_ASSESSMENT_COMPLETED,
@@ -430,12 +451,14 @@ describe("syncLandingPageHook", () => {
         });
 
         expect(
-            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_INITIATED)
-                .uniqueId,
+            eventByName(
+                KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_INITIATED,
+            ).uniqueId,
         ).toBe("hook-1:LandingPageEmailFlowPaymentInitiated");
         expect(
-            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_COMPLETED)
-                .uniqueId,
+            eventByName(
+                KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_COMPLETED,
+            ).uniqueId,
         ).toBe("hook-1:LandingPageEmailFlowPaymentCompleted");
     });
 
@@ -453,10 +476,14 @@ describe("syncLandingPageHook", () => {
         });
 
         expect(
-            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_INITIATED),
+            eventByName(
+                KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_INITIATED,
+            ),
         ).toBeUndefined();
         expect(
-            eventByName(KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_COMPLETED),
+            eventByName(
+                KLAVIYO_EVENTS.LANDING_PAGE_EMAIL_FLOW_PAYMENT_COMPLETED,
+            ),
         ).toBeUndefined();
     });
 

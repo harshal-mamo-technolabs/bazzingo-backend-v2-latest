@@ -525,6 +525,10 @@ describe("stripe elements subscription endpoints", () => {
         });
 
         it("creates an active subscription", async () => {
+            await User.findByIdAndUpdate(user._id, {
+                flowId: "OLD_FLOW",
+                utmEmail: "old_email",
+            });
             mockStripe.subscriptions.create.mockResolvedValue({
                 id: "sub_1",
                 status: "active",
@@ -566,9 +570,25 @@ describe("stripe elements subscription endpoints", () => {
 
             const saved = await User.findById(user._id).lean();
             expect(saved.defaultPaymentMethodId).toBe("pm_1");
+            const metadata =
+                mockStripe.subscriptions.create.mock.calls[0][0].metadata;
+            expect(metadata).not.toHaveProperty("flow_id");
+            expect(metadata).not.toHaveProperty("utm_email");
         });
 
         it("creates a trial subscription with the trial fee invoice item", async () => {
+            await User.findByIdAndUpdate(user._id, {
+                flowId: "OLD_FLOW",
+                utmEmail: "old_email",
+            });
+            mockStripe.setupIntents.retrieve.mockResolvedValue({
+                ...succeededSetupIntent,
+                metadata: {
+                    ...succeededSetupIntent.metadata,
+                    flow_id: "XHLfvC",
+                    utm_email: "Klaviyo",
+                },
+            });
             const trialEnd = 1702592000;
             mockStripe.subscriptions.create.mockResolvedValue({
                 id: "sub_trial",
@@ -586,6 +606,7 @@ describe("stripe elements subscription endpoints", () => {
                     withTrial: true,
                     trialPriceId: TRIAL_PRICE.id,
                     trialDays: 4,
+                    flow_id: "DIFFERENT_FLOW",
                 });
 
             expect(res.status).toBe(200);
@@ -612,7 +633,13 @@ describe("stripe elements subscription endpoints", () => {
                 }),
             );
             expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
-                expect.objectContaining({ trial_period_days: 4 }),
+                expect.objectContaining({
+                    trial_period_days: 4,
+                    metadata: expect.objectContaining({
+                        flow_id: "XHLfvC",
+                        flow: "stripe_elements_trial",
+                    }),
+                }),
             );
         });
 

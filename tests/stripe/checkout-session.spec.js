@@ -94,6 +94,58 @@ describe("POST /stripe/checkout/session", () => {
             .set("Authorization", `Bearer ${accessToken}`)
             .send(body);
 
+    it.each([false, true])(
+        "uses saved attribution for later purchases (legacy=%s)",
+        async (legacy) => {
+            const buyer = await createUser({
+                email: "buyer@bazzingo.com",
+                utmSource: "google",
+                utmCampaign: "brand",
+                utmMedium: "cpc",
+                utmEmail: "Klaviyo",
+                stripeCustomerId: "cus_existing",
+            });
+            if (legacy) {
+                await User.collection.updateOne(
+                    { _id: buyer._id },
+                    {
+                        $set: { utmCampaign: "default" },
+                        $unset: { utmMedium: 1 },
+                    },
+                );
+            }
+            const assessment = await seedAssessment();
+            await seedPrice(assessment._id);
+            const response = await checkout(
+                {
+                    assessmentId: String(assessment._id),
+                    successUrl: "https://a",
+                    cancelUrl: "https://b",
+                    utm_source: "Klaviyo",
+                    utm_campaign: "reminder",
+                    utm_medium: "email",
+                },
+                getAccessToken(buyer._id),
+            );
+            expect(response.status).toBe(200);
+            const expected = {
+                utm_source: "google",
+                utm_campaign: legacy ? "organic" : "brand",
+                utm_medium: legacy ? "organic" : "cpc",
+            };
+            const params = mockStripe.checkout.sessions.create.mock.calls[0][0];
+            expect(params.metadata).toMatchObject(expected);
+            expect(params.payment_intent_data.metadata).toMatchObject(expected);
+            expect(
+                await User.collection.findOne({ _id: buyer._id }),
+            ).toMatchObject({
+                utmSource: expected.utm_source,
+                utmCampaign: expected.utm_campaign,
+                utmMedium: expected.utm_medium,
+            });
+        },
+    );
+
     describe("given no access token", () => {
         it("should return a 401 status code", async () => {
             const response = await request(app)
@@ -220,6 +272,9 @@ describe("POST /stripe/checkout/session", () => {
                 metadata: {
                     userId: user._id.toString(),
                     source: "checkout_flow",
+                    utm_source: "organic",
+                    utm_campaign: "organic",
+                    utm_medium: "organic",
                 },
             });
 

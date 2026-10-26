@@ -69,9 +69,9 @@ describe("HelpscoutService", () => {
                 email: "player@bazzingo.com",
                 name: "player@bazzingo.com",
                 properties: {
-                    utm_source: "default",
-                    utm_campaign: "default",
-                    utm_medium: "default",
+                    utm_source: "organic",
+                    utm_campaign: "organic",
+                    utm_medium: "organic",
                 },
             });
             expect(result.expiresAt).toBeGreaterThanOrEqual(
@@ -166,8 +166,8 @@ describe("HelpscoutService", () => {
             expect(patchOptions.method).toBe("PATCH");
             expect(JSON.parse(patchOptions.body)).toEqual([
                 { op: "replace", path: "/utm_source", value: "newsletter" },
-                { op: "replace", path: "/utm_campaign", value: "default" },
-                { op: "replace", path: "/utm_medium", value: "default" },
+                { op: "replace", path: "/utm_campaign", value: "organic" },
+                { op: "replace", path: "/utm_medium", value: "organic" },
             ]);
         });
 
@@ -199,9 +199,9 @@ describe("HelpscoutService", () => {
                 lastName: "Kumar Patel",
                 emails: [{ type: "work", value: "player@bazzingo.com" }],
                 properties: [
-                    { slug: "utm_source", value: "default" },
-                    { slug: "utm_campaign", value: "default" },
-                    { slug: "utm_medium", value: "default" },
+                    { slug: "utm_source", value: "organic" },
+                    { slug: "utm_campaign", value: "organic" },
+                    { slug: "utm_medium", value: "organic" },
                 ],
             });
         });

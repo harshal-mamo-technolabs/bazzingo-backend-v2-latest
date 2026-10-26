@@ -27,7 +27,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
     "https://brainy-spark-craft.lovable.app",
     "https://id-preview--db7cedbb-c50e-4093-88c2-36c36016b11c.lovable.app",
     "https://db7cedbb-c50e-4093-88c2-36c36016b11c.lovableproject.com",
-    "https://portal.testbrain.net"
+    "https://portal.testbrain.net",
+    "https://merkgo.com"
 ];
 
 const CORS_OPTIONS = {

@@ -1,3 +1,4 @@
+const captureFlowAttribution = require("../../common/middlewares/captureFlowAttribution");
 const express = require("express");
 const logger = require("../../config/logger");
 const { getStripe } = require("../../config/stripe");
@@ -36,9 +37,15 @@ router.route("/prices").post(requireAdmin(), handler("createPrice"));
 
 router
     .route("/checkout/session")
-    .post(requireAuth, handler("createCheckoutOrOneClick"));
+    .post(
+        requireAuth,
+        captureFlowAttribution,
+        handler("createCheckoutOrOneClick"),
+    );
 
-router.route("/subscription").post(requireAuth, handler("createSubscription"));
+router
+    .route("/subscription")
+    .post(requireAuth, captureFlowAttribution, handler("createSubscription"));
 
 router
     .route("/subscription/confirm")

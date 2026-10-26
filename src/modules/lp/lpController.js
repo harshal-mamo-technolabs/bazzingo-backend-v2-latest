@@ -6,6 +6,7 @@ const { getCETMidnight } = require("../../common/utils/time");
 const {
     applyUtmToRecord,
     parseUtmParams,
+    parseFlowId,
 } = require("../../common/utils/utmParams");
 const {
     ACCOUNT_DELETED_REASON,
@@ -53,6 +54,8 @@ class LpController {
             return;
         }
 
+        await this.lpService.backfillUserUtmFromHook(hook);
+
         try {
             await this.klaviyoSyncService.syncLandingPageHook({
                 hook,
@@ -69,14 +72,12 @@ class LpController {
             });
         }
 
-        await this.lpService.backfillUserUtmFromHook(hook);
-
+        const storedUser = await this.lpService.findUserByEmail(hook.email);
+        const attribution = storedUser || hook;
         this.helpscoutService.scheduleSyncContactUtmToHelpScout({
             email: hook.email,
             name: hook.name,
-            utmSource: hook.utmSource,
-            utmCampaign: hook.utmCampaign,
-            utmMedium: hook.utmMedium,
+            ...parseUtmParams(attribution),
             utmEmail: hook.utmEmail,
         });
     }
@@ -94,8 +95,10 @@ class LpController {
         }
 
         let hook = await this.lpService.findHookByUuid(uuid);
+        const flowId = parseFlowId(req.body);
 
         if (hook) {
+            if (flowId) hook.flowId = flowId;
             for (const key of LP_HOOK_UPDATABLE_FIELDS) {
                 if (req.body[key] !== undefined && req.body[key] !== null) {
                     hook[key] = req.body[key];
@@ -119,6 +122,7 @@ class LpController {
             hook = await this.lpService.createHook({
                 ...fields,
                 ...parseUtmParams(req.body),
+                ...(flowId ? { flowId } : {}),
             });
         }
 
@@ -163,6 +167,9 @@ class LpController {
         const previousHook = Object.fromEntries(
             LP_HOOK_SNAPSHOT_FIELDS.map((field) => [field, hook[field]]),
         );
+
+        const flowId = parseFlowId(updates);
+        if (flowId) hook.flowId = flowId;
 
         applyUtmToRecord(hook, parseUtmParams(updates, { onlyProvided: true }));
 
@@ -215,11 +222,14 @@ class LpController {
         const utmEmail =
             typeof queryUtmEmail === "string" ? queryUtmEmail.trim() : "";
         const previousHook = hook.toObject();
+        const flowId = parseFlowId(req.query);
+        if (flowId) hook.flowId = flowId;
 
         if (utmEmail && hook.utmEmail !== utmEmail) {
             hook.utmEmail = utmEmail;
-            await this.lpService.saveHook(hook);
         }
+        if (hook.isModified()) await this.lpService.saveHook(hook);
+        await this.lpService.backfillUserUtmFromHook(hook);
 
         const stage = this.klaviyoSyncService.funnelStage(hook);
         const token = await this.mintResumeToken(req, hook, stage);
@@ -242,6 +252,8 @@ class LpController {
             }
 
             if (utmEmail) {
+                const user = await this.lpService.findUserByEmail(hook.email);
+                const attribution = parseUtmParams(user || hook);
                 this.klaviyoService
                     .createEvent({
                         email: hook.email,
@@ -250,7 +262,13 @@ class LpController {
                         uniqueId: `${uuid}:${LP_KLAVIYO_EVENT_IDS.RESUMED}:${stage}`,
                         properties: {
                             [LP_KLAVIYO_PROPERTIES.STAGE]: stage,
-                            [LP_KLAVIYO_PROPERTIES.MEDIUM]: utmEmail,
+                            [LP_KLAVIYO_PROPERTIES.SOURCE]:
+                                attribution.utmSource,
+                            [LP_KLAVIYO_PROPERTIES.CAMPAIGN]:
+                                attribution.utmCampaign,
+                            [LP_KLAVIYO_PROPERTIES.MEDIUM]:
+                                attribution.utmMedium,
+                            utm_email: utmEmail,
                             [LP_KLAVIYO_PROPERTIES.LANDING_PAGE_NAME]:
                                 hook.landingPageName ?? undefined,
                         },

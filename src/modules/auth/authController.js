@@ -4,7 +4,9 @@ const { config } = require("../../config");
 const { sendResponse } = require("../../common/utils/response");
 const {
     parseUtmParams,
+    parseFlowId,
     ensureUtmDefaults,
+    persistUtmDefaults,
     realUtmValue,
     UTM_DEFAULT,
 } = require("../../common/utils/utmParams");
@@ -131,23 +133,24 @@ class AuthController {
         const providedUtm = parseUtmParams(req.body, { onlyProvided: true });
 
         const hookUtm = await this.resolveHookUtm({
-            providedUtm,
             email,
             uuid,
             requestId: req.requestId,
         });
 
         let user = await this.authService.findByEmail(email);
+        if (user) await persistUtmDefaults(user);
 
         const resolveUtm = (field) =>
-            realUtmValue(providedUtm[field]) ??
-            realUtmValue(hookUtm[field]) ??
             (user ? realUtmValue(user[field]) : null) ??
+            realUtmValue(hookUtm[field]) ??
+            realUtmValue(providedUtm[field]) ??
             UTM_DEFAULT;
 
         const utmSource = resolveUtm("utmSource");
         const utmCampaign = resolveUtm("utmCampaign");
         const utmMedium = resolveUtm("utmMedium");
+        const flowId = parseFlowId(req.body) ?? hookUtm.flowId ?? user?.flowId;
 
         // Unlike the three fields above, utmEmail has no "default" fallback —
         // it should stay unset for organic traffic rather than be forced to a value.
@@ -181,6 +184,7 @@ class AuthController {
             user.utmCampaign = utmCampaign;
             user.utmMedium = utmMedium;
             if (utmEmail) user.utmEmail = utmEmail;
+            if (flowId) user.flowId = flowId;
             ensureUtmDefaults(user);
 
             await user.save();
@@ -202,6 +206,7 @@ class AuthController {
                 utmCampaign,
                 utmMedium,
                 ...(utmEmail ? { utmEmail } : {}),
+                ...(flowId ? { flowId } : {}),
             });
         }
 
@@ -226,16 +231,7 @@ class AuthController {
         });
     }
 
-    async resolveHookUtm({ providedUtm, email, uuid, requestId }) {
-        const needsLookup =
-            realUtmValue(providedUtm.utmSource) === null ||
-            realUtmValue(providedUtm.utmCampaign) === null ||
-            realUtmValue(providedUtm.utmMedium) === null;
-
-        if (!needsLookup) {
-            return {};
-        }
-
+    async resolveHookUtm({ email, uuid, requestId }) {
         try {
             const emailKey = email ? String(email).toLowerCase() : null;
 
@@ -263,6 +259,7 @@ class AuthController {
                 utmCampaign: hook.utmCampaign,
                 utmMedium: hook.utmMedium,
                 utmEmail: hook.utmEmail,
+                flowId: hook.flowId,
             };
         } catch (err) {
             this.logger.error("Landing page hook utm lookup failed", {

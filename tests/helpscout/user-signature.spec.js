@@ -71,8 +71,8 @@ describe("GET /helpscout/user-signature", () => {
             name: "Harshal Patel",
             properties: {
                 utm_source: "newsletter",
-                utm_campaign: "default",
-                utm_medium: "default",
+                utm_campaign: "organic",
+                utm_medium: "organic",
             },
         });
         expect(res.body.data.properties).toEqual(res.body.data.user.properties);
