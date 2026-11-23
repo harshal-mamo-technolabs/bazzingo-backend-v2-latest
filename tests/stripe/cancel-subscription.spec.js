@@ -352,6 +352,7 @@ describe("POST /stripe/subscription/cancel", () => {
             expect(sync).toHaveBeenCalledTimes(1);
             expect(sync.mock.calls[0][0]).toMatchObject({
                 email: user.email,
+                cancelled: true,
             });
             expect(String(sync.mock.calls[0][0].userId)).toBe(String(user._id));
             expect(String(sync.mock.calls[0][0].subscriptionRecord._id)).toBe(

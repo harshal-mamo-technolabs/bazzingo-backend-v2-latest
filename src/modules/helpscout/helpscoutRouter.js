@@ -13,6 +13,7 @@ const { HelpscoutController } = require("./helpscoutController");
 const { HelpscoutService } = require("./helpscoutService");
 
 const router = express.Router();
+router.use("/billing-sidebar", require("./billingSidebarRouter"));
 
 const helpscoutController = new HelpscoutController(
     new HelpscoutService(logger),

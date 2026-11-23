@@ -49,6 +49,7 @@ class StripeElementsService {
                     email: user.email,
                     stripeSubscription: subscription,
                     subscriptionRecord: localSubscription,
+                    cancelled: true,
                 });
             }
         } catch (error) {

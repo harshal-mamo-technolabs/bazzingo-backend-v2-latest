@@ -380,6 +380,70 @@ describe("syncSubscription", () => {
         expect(klaviyoService.createEvent).not.toHaveBeenCalled();
     });
 
+    it("should fire the cancellation event with the survey when cancelled", async () => {
+        await buildService().syncSubscription({
+            userId: user._id,
+            email: user.email,
+            stripeSubscription: stripeSubscription({
+                status: "trialing",
+                cancel_at_period_end: true,
+                cancel_at: PERIOD_END,
+                canceled_at: PERIOD_START,
+            }),
+            subscriptionRecord: {
+                cancelReason: "Too expensive",
+                wouldHaveStayedIfOffered: ["discount", "pause"],
+            },
+            previousSubscriptionStatus: "trialing",
+            cancelled: true,
+        });
+
+        expect(klaviyoService.createEvent).toHaveBeenCalledTimes(1);
+        expect(event()).toMatchObject({
+            email: user.email,
+            metricName: KLAVIYO_EVENTS.SUBSCRIPTION_CANCELLED,
+            uniqueId: `sub_1:SubscriptionCancelled:${PERIOD_START * 1000}`,
+            properties: {
+                "Stripe subscription id": "sub_1",
+                "bazingo-cancelled immediately": false,
+                "bazingo-access ends at": new Date(PERIOD_END * 1000).toISOString(),
+                "bazingo-cancelled during trial": true,
+                "bazingo-cancel reason": "Too expensive",
+                "bazingo-would have you stayed if offered": "discount, pause",
+            },
+        });
+    });
+
+    it("should mark an immediate cancellation", async () => {
+        await buildService().syncSubscription({
+            userId: user._id,
+            email: user.email,
+            stripeSubscription: stripeSubscription({
+                status: "canceled",
+                canceled_at: PERIOD_START,
+            }),
+            subscriptionRecord: { cancelReason: "Other" },
+            previousSubscriptionStatus: "active",
+            cancelled: true,
+        });
+
+        expect(event().properties).toMatchObject({
+            "bazingo-cancelled immediately": true,
+            "bazingo-access ends at": new Date(PERIOD_START * 1000).toISOString(),
+        });
+    });
+
+    it("should not fire the cancellation event on a plain sync", async () => {
+        await buildService().syncSubscription({
+            userId: user._id,
+            email: user.email,
+            stripeSubscription: stripeSubscription({ cancel_at_period_end: true }),
+            previousSubscriptionStatus: "active",
+        });
+
+        expect(klaviyoService.createEvent).not.toHaveBeenCalled();
+    });
+
     it("should not throw when the activation event fails", async () => {
         klaviyoService.createEvent.mockRejectedValue(new Error("klaviyo down"));
 

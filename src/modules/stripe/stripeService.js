@@ -311,38 +311,6 @@
                 return stripePriceId;
             }
 
-            async resolveConfirmStripePriceId(reference) {
-                if (!reference) {
-                    return null;
-                }
-
-                if (isStripePriceId(reference)) {
-                    return reference;
-                }
-
-                const priceDoc = await PriceCatalog.findById(reference).lean();
-
-                if (!priceDoc) {
-                    throw createHttpError(
-                        400,
-                        STRIPE_MESSAGE_BUILDERS.priceCatalogNotFound(String(reference)),
-                    );
-                }
-
-                const stripePriceId = extractStripePriceId(priceDoc);
-
-                if (!stripePriceId) {
-                    throw createHttpError(
-                        400,
-                        STRIPE_MESSAGE_BUILDERS.priceCatalogWithoutStripeIdShort(
-                            priceDoc._id,
-                        ),
-                    );
-                }
-
-                return stripePriceId;
-            }
-
             async resolvePriceParent({ assessmentId, planId, productDuration }) {
                 if (assessmentId) {
                     const assessment = await FullAssessment.findById(assessmentId);
@@ -1197,74 +1165,9 @@
                         return { kind: "created", stripeSubscription, paymentIntent, planInfo };
                     }
 
-                    let recurringPriceRef = null;
-
-                    if (type === STRIPE_SUBSCRIPTION_TYPES.TRIAL) {
-                        if (plan.prices?.monthly?.priceId) {
-                            recurringPriceRef = plan.prices.monthly.priceId;
-                        } else if (plan.prices?.yearly?.priceId) {
-                            recurringPriceRef = plan.prices.yearly.priceId;
-                        }
-                    } else {
-                        const priceConfig = plan.prices?.[type];
-
-                        if (!priceConfig?.priceId) {
-                            throw createHttpError(
-                                400,
-                                STRIPE_MESSAGE_BUILDERS.planPriceNotConfigured(type),
-                            );
-                        }
-
-                        recurringPriceRef = priceConfig.priceId;
-                    }
-
-                    const recurringPriceId =
-                        await this.resolveConfirmStripePriceId(recurringPriceRef);
-
-                    const subscriptionParams = {
-                        customer: user.stripeCustomerId,
-                        items: [{ price: recurringPriceId, quantity: 1 }],
-                        default_payment_method: user.defaultPaymentMethodId,
-                        metadata: mergeUtmMetadata(
-                            {
-                                userId: String(user._id),
-                                planId: String(planId),
-                                subscriptionType: type,
-                                recurringCadence,
-                                trialRequested: String(trialRequested),
-                                trialHonored: String(trialHonored),
-                                freeTrialDays: String(freeTrialDays),
-                                flow: STRIPE_FLOWS.CONFIRMED_AFTER_3DS,
-                                paymentIntentId: paymentIntent.id,
-                                firstPaymentCompleted: "true",
-                            },
-                            user,
-                        ),
-                    };
-
-                    if (trialHonored && freeTrialDays > 0) {
-                        subscriptionParams.trial_period_days = freeTrialDays;
-                    } else {
-                        subscriptionParams.billing_cycle_anchor = Math.floor(
-                            addCadence(new Date(), recurringCadence).getTime() / 1000,
-                        );
-                        subscriptionParams.proration_behavior = "none";
-                    }
-
-                    const stripeSubscription =
-                        await this.stripe.subscriptions.create(subscriptionParams);
-
-                    this.logger.info("Subscription confirmed after authentication", {
-                        userId: String(user._id),
-                        subscriptionId: stripeSubscription.id,
-                    });
-
-                    return {
-                        kind: "created",
-                        stripeSubscription,
-                        paymentIntent,
-                        planInfo,
-                    };
+                    // Every subscription flow now bills through Stripe prices and tags the
+                    // PaymentIntent with its subscription; a payment without one is not ours.
+                    throw createHttpError(409, STRIPE_MESSAGES.PAYMENT_NOT_FOR_SUBSCRIPTION);
                 } catch (error) {
                     this.logger.error("Subscription confirmation failed", {
                         userId: String(user._id),
@@ -1541,7 +1444,12 @@
                 }
             }
 
-            async cancelSubscription({ userId, cancelAtPeriodEnd, body }) {
+            async cancelSubscription({
+                userId,
+                cancelAtPeriodEnd,
+                body,
+                expectedSubscriptionId,
+            }) {
                 this.logger.info("Cancelling a subscription", {
                     userId: String(userId),
                     cancelAtPeriodEnd,
@@ -1560,6 +1468,16 @@
                     throw createHttpError(
                         404,
                         STRIPE_MESSAGES.NO_ACTIVE_SUBSCRIPTION_FOUND,
+                    );
+                }
+
+                if (
+                    expectedSubscriptionId &&
+                    subscription.stripeSubscriptionId !== expectedSubscriptionId
+                ) {
+                    throw createHttpError(
+                        409,
+                        "The subscription changed. Refresh before cancelling.",
                     );
                 }
 
@@ -1635,6 +1553,7 @@
                             email: user.email,
                             stripeSubscription,
                             subscriptionRecord: subscription,
+                            cancelled: true,
                         });
                     }
 

@@ -211,12 +211,12 @@ describe("POST /stripe/subscription/confirm", () => {
             expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
         });
 
-        it("should create a regular subscription", async () => {
+        it("should return a 409 status code when the payment has no subscription", async () => {
             const plan = await seedPlan();
             mockStripe.paymentIntents.retrieve.mockResolvedValue({
                 id: "pi_1",
                 status: "succeeded",
-                metadata: { flow_id: "ORIGINAL_FLOW", utm_email: "Klaviyo" },
+                metadata: { flow_id: "ORIGINAL_FLOW" },
             });
 
             const response = await confirm({
@@ -225,130 +225,25 @@ describe("POST /stripe/subscription/confirm", () => {
                 type: "monthly",
             });
 
-            expect(response.statusCode).toBe(200);
+            expect(response.statusCode).toBe(409);
             expect(response.body.message).toBe(
-                "Subscription created after 3D Secure authentication",
+                "This payment does not belong to a subscription",
             );
-            expect(response.body.data.subscriptionId).toBe("sub_confirmed");
-            expect(response.body.data.plan).toEqual({
-                id: plan._id.toString(),
-                name: "Pro",
-                type: "monthly",
-                recurringCadence: "monthly",
-                paidTrial: false,
-                freeTrialDays: 0,
-                trialRequested: false,
-                trialHonored: false,
-            });
-            expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    customer: "cus_saved",
-                    items: [{ price: "price_monthly", quantity: 1 }],
-                    default_payment_method: "pm_saved",
-                    proration_behavior: "none",
-                    metadata: expect.objectContaining({
-                        flow_id: "ORIGINAL_FLOW",
-                        utm_email: "Klaviyo",
-                    }),
-                }),
-            );
-        });
-
-        it("should create a trial subscription from the intent metadata", async () => {
-            const plan = await seedPlan();
-            mockStripe.paymentIntents.retrieve.mockResolvedValue({
-                id: "pi_1",
-                status: "succeeded",
-                metadata: {
-                    recurringCadence: "monthly",
-                    trialRequested: "true",
-                    trialHonored: "true",
-                    freeTrialDays: "3",
-                    trialPriceId: "price_trial",
-                },
-            });
-
-            const response = await confirm({
-                paymentIntentId: "pi_1",
-                planId: plan._id.toString(),
-                type: "trial",
-            });
-
-            expect(response.statusCode).toBe(200);
-            expect(response.body.message).toBe(
-                "Subscription created with trial after 3D Secure authentication",
-            );
-            expect(response.body.data.plan.paidTrial).toBe(true);
-            expect(response.body.data.plan.freeTrialDays).toBe(3);
-            expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
-                expect.objectContaining({ trial_period_days: 3 }),
-            );
-        });
-
-        it("should return a 400 status code when the requested cadence is missing", async () => {
-            const plan = await Plan.create({
-                name: "Pro",
-                stripeProductId: "prod_plan",
-                prices: {},
-            });
-            mockStripe.paymentIntents.retrieve.mockResolvedValue({
-                id: "pi_1",
-                status: "succeeded",
-                metadata: {},
-            });
-
-            const response = await confirm({
-                paymentIntentId: "pi_1",
-                planId: plan._id.toString(),
-                type: "yearly",
-            });
-
-            expect(response.statusCode).toBe(400);
-            expect(response.body.message).toBe(
-                "Plan does not have a yearly price configured",
-            );
+            expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
         });
     });
 
-    describe("given Stripe rejects the subscription", () => {
-        it("should return a 404 status code for a missing price", async () => {
-            const plan = await seedPlan();
-            mockStripe.paymentIntents.retrieve.mockResolvedValue({
-                id: "pi_1",
-                status: "succeeded",
-                metadata: {},
-            });
-            const stripeError = new Error("No such price");
-            stripeError.type = "StripeInvalidRequestError";
-            stripeError.code = "resource_missing";
-            stripeError.raw = {
-                param: "price",
-                message: "No such price: 'price_monthly'",
-            };
-            mockStripe.subscriptions.create.mockRejectedValue(stripeError);
-
-            const response = await confirm({
-                paymentIntentId: "pi_1",
-                planId: plan._id.toString(),
-                type: "monthly",
-            });
-
-            expect(response.statusCode).toBe(404);
-            expect(response.body.message).toBe(
-                "Stripe price not found: price_monthly. The price may have been deleted in Stripe. Please verify the price exists in your Stripe account.",
-            );
-        });
-
+    describe("given Stripe fails", () => {
         it("should propagate the Stripe status code", async () => {
             const plan = await seedPlan();
             mockStripe.paymentIntents.retrieve.mockResolvedValue({
                 id: "pi_1",
                 status: "succeeded",
-                metadata: {},
+                metadata: { subscriptionId: "sub_one_click" },
             });
-            const stripeError = new Error("card_declined");
-            stripeError.statusCode = 402;
-            mockStripe.subscriptions.create.mockRejectedValue(stripeError);
+            const stripeError = new Error("rate_limited");
+            stripeError.statusCode = 429;
+            mockStripe.subscriptions.retrieve.mockRejectedValue(stripeError);
 
             const response = await confirm({
                 paymentIntentId: "pi_1",
@@ -356,8 +251,8 @@ describe("POST /stripe/subscription/confirm", () => {
                 type: "monthly",
             });
 
-            expect(response.statusCode).toBe(402);
-            expect(response.body.message).toBe("card_declined");
+            expect(response.statusCode).toBe(429);
+            expect(response.body.message).toBe("rate_limited");
         });
 
         it("should return a 500 status code when the retrieve fails", async () => {

@@ -181,6 +181,11 @@ describe("route parity with the v1 backend", () => {
         // GET /stripe/invoices which predates this test) — not part of v1
         // parity, so they live here rather than in V1_ENDPOINTS.
         const POST_MIGRATION_ENDPOINTS = [
+            "GET /helpscout/billing-sidebar",
+            "GET /helpscout/billing-sidebar/client.js",
+            "POST /helpscout/billing-sidebar/context",
+            "POST /helpscout/billing-sidebar/refresh",
+            "POST /helpscout/billing-sidebar/cancel",
             "GET /stripe/invoices",
             "GET /stripe-elements/payment-methods",
             "POST /stripe-elements/payment-methods/setup-intent",

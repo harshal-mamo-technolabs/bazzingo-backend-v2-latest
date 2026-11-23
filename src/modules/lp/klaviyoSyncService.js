@@ -571,6 +571,8 @@ class KlaviyoSyncService {
         invoice,
         subscriptionRecord,
         previousSubscriptionStatus,
+        // set by the cancel endpoints: the user just asked to cancel
+        cancelled = false,
     }) {
         const safeEmail =
             typeof email === "string" ? email.trim().toLowerCase() : null;
@@ -694,6 +696,17 @@ class KlaviyoSyncService {
             activated,
         });
 
+        if (cancelled) {
+            await this.createSubscriptionCancelledEvent({
+                email: safeEmail,
+                subscription,
+                subscriptionRecord,
+                planName,
+                intervalLabel,
+                planEndISO,
+            });
+        }
+
         if (!activated) {
             return { ok: true };
         }
@@ -760,6 +773,60 @@ class KlaviyoSyncService {
         }
 
         return { ok: true };
+    }
+
+    /**
+     * BAZZINGO:SUBSCRIPTION_CANCELLED, with the survey answers and when
+     * access ends. Keyed on Stripe's canceled_at, so a retry of the same
+     * cancellation is sent once.
+     */
+    async createSubscriptionCancelledEvent({
+        email,
+        subscription,
+        subscriptionRecord,
+        planName,
+        intervalLabel,
+        planEndISO,
+    }) {
+        const immediate =
+            subscription.status === STRIPE_SUBSCRIPTION_STATUSES.CANCELED;
+        const cancelledAt = subscription.canceled_at
+            ? new Date(subscription.canceled_at * 1000)
+            : new Date();
+        const accessEndsISO = immediate
+            ? cancelledAt.toISOString()
+            : (fromStripeSecondsToISO(subscription.cancel_at) ?? planEndISO);
+
+        await this.klaviyoService
+            .createEvent({
+                email,
+                metricName: KLAVIYO_EVENTS.SUBSCRIPTION_CANCELLED,
+                uniqueId: `${subscription.id}:${LP_KLAVIYO_EVENT_IDS.SUBSCRIPTION_CANCELLED}:${cancelledAt.getTime()}`,
+                timeISO: cancelledAt.toISOString(),
+                properties: {
+                    [LP_KLAVIYO_SUBSCRIPTION_PROPERTIES.PLAN_NAME]:
+                        planName ?? undefined,
+                    [LP_KLAVIYO_SUBSCRIPTION_PROPERTIES.PLAN_DURATION]:
+                        intervalLabel ?? undefined,
+                    [LP_KLAVIYO_SUBSCRIPTION_PROPERTIES.SUBSCRIPTION_ID]:
+                        subscription.id,
+                    [LP_KLAVIYO_SUBSCRIPTION_PROPERTIES.CANCELLED_IMMEDIATELY]:
+                        immediate,
+                    [LP_KLAVIYO_SUBSCRIPTION_PROPERTIES.ACCESS_ENDS_AT]:
+                        accessEndsISO ?? undefined,
+                    [LP_KLAVIYO_SUBSCRIPTION_PROPERTIES.WAS_TRIAL]:
+                        subscription.status ===
+                            STRIPE_SUBSCRIPTION_STATUSES.TRIALING,
+                    ...cancellationSurveyProperties(subscriptionRecord),
+                },
+            })
+            .catch((err) =>
+                this.logger.error("Failed to create a Klaviyo event", {
+                    metricName: KLAVIYO_EVENTS.SUBSCRIPTION_CANCELLED,
+                    subscriptionId: subscription.id,
+                    message: err.message,
+                }),
+            );
     }
 
     async syncAssessmentPurchase({ order, purchasedAtISO }) {

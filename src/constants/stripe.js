@@ -101,7 +101,6 @@ const STRIPE_FLOWS = {
     SUBSCRIPTION_CHECKOUT: "subscription_checkout",
     PAID_TRIAL_CHECKOUT: "paid_trial_checkout",
     ONE_CLICK_SUBSCRIPTION: "one_click_subscription",
-    CONFIRMED_AFTER_3DS: "confirmed_after_3ds",
 };
 
 const STRIPE_WEBHOOK_ELEMENTS_FLOWS = [
@@ -297,6 +296,8 @@ const STRIPE_MESSAGES = {
         "Subscription created after 3D Secure authentication",
     CONFIRM_SUBSCRIPTION_FAILED:
         "Failed to create subscription after authentication",
+    PAYMENT_NOT_FOR_SUBSCRIPTION:
+        "This payment does not belong to a subscription",
     NO_ACTIVE_SUBSCRIPTION_FOUND: "No active subscription found",
     SUBSCRIPTION_ALREADY_CANCELED: "Subscription is already canceled",
     SUBSCRIPTION_CANCEL_AT_PERIOD_END:
@@ -349,8 +350,6 @@ const STRIPE_MESSAGE_BUILDERS = {
     priceCatalogNotFound: (ref) => `PriceCatalog not found for ref: ${ref}`,
     priceCatalogWithoutStripeId: (id) =>
         `PriceCatalog ${id} is missing a valid Stripe price id (expected 'price_...')`,
-    priceCatalogWithoutStripeIdShort: (id) =>
-        `PriceCatalog ${id} is missing a valid Stripe price id`,
     checkoutPriceMissing: (id) =>
         `Stripe price not found: ${id}. The price may have been deleted in Stripe or does not exist. Please update the PriceCatalog entry or create a new price.`,
     subscriptionPricesMissing: (ids) =>

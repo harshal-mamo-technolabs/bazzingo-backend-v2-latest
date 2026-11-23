@@ -147,6 +147,7 @@ const LP_KLAVIYO_EVENT_IDS = {
     RESUMED: "Resumed",
     SUBSCRIPTION_ACTIVATED: "SubscriptionActivated",
     STANDARD_PLAN_ACTIVATED: "StandardPlanActivated",
+    SUBSCRIPTION_CANCELLED: "SubscriptionCancelled",
     ASSESSMENT_PURCHASED: "AssessmentPurchased",
     EMAIL_FLOW_PAYMENT_INITIATED: "LandingPageEmailFlowPaymentInitiated",
     EMAIL_FLOW_PAYMENT_COMPLETED: "LandingPageEmailFlowPaymentCompleted",
@@ -165,6 +166,9 @@ const LP_KLAVIYO_SUBSCRIPTION_PROPERTIES = {
     NEXT_BILLING_DATE: "Next billing date",
     CANCEL_REASON: "bazingo-cancel reason",
     WOULD_HAVE_STAYED: "bazingo-would have you stayed if offered",
+    CANCELLED_IMMEDIATELY: "bazingo-cancelled immediately",
+    ACCESS_ENDS_AT: "bazingo-access ends at",
+    WAS_TRIAL: "bazingo-cancelled during trial",
 };
 
 const LP_KLAVIYO_PURCHASE_PROPERTIES = {
